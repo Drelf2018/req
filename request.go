@@ -1,7 +1,9 @@
 package req
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -192,6 +194,18 @@ func NewRequestWithContext(ctx context.Context, api Api) (req *http.Request, err
 		}
 		req, err = http.NewRequestWithContext(ctx, api.Method(), api.URL(), r)
 		req.Header.Set("Content-Type", w.ContentType())
+	} else if _, isJson := api.(postJson); isJson {
+		body := make(JsonBody)
+		err = AddData(body, task.Body, v)
+		if err != nil {
+			return
+		}
+		buf := &bytes.Buffer{}
+		err = json.NewEncoder(buf).Encode(body)
+		if err != nil {
+			return
+		}
+		req, err = http.NewRequestWithContext(ctx, api.Method(), api.URL(), buf)
 	} else {
 		body := make(url.Values)
 		err = AddData(body, task.Body, v)
