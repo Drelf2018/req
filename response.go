@@ -5,6 +5,8 @@ import (
 	"net/http"
 )
 
+type Unwrap interface {
+	Unwrap() error
 }
 
 func Do[T any](api Api) (zero T, err error) {
@@ -28,6 +30,13 @@ func Do[T any](api Api) (zero T, err error) {
 	defer resp.Body.Close()
 
 	err = json.NewDecoder(resp.Body).Decode(&zero)
+	if err != nil {
+		return
+	}
+
+	if i, ok := any(zero).(Unwrap); ok {
+		err = i.Unwrap()
+	}
 	return
 }
 
