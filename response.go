@@ -5,12 +5,7 @@ import (
 	"net/http"
 )
 
-func Value[T any](resp *http.Response) (zero T, err error) {
-	err = json.NewDecoder(resp.Body).Decode(&zero)
-	return
 }
-
-var Map = Value[map[string]any]
 
 func Do[T any](api Api) (zero T, err error) {
 	var client *http.Client
