@@ -1,7 +1,6 @@
 package req_test
 
 import (
-	"io"
 	"testing"
 
 	"github.com/Drelf2018/req"
@@ -19,23 +18,7 @@ func (reqMarshal) MarshalString() (string, error) {
 	return "reqMarshal", nil
 }
 
-type reader struct{}
-
-func (reader) Read(p []byte) (n int, err error) {
-	return copy(p, "reader"), io.EOF
-}
-
-type stringer struct{}
-
-func (stringer) String() string {
-	return "stringer"
-}
-
-type goStringer struct{}
-
-func (goStringer) GoString() string {
-	return "goStringer"
-}
+var _ req.Marshaler = (*reqMarshal)(nil)
 
 type user struct {
 	Name string `json:"name"`
@@ -46,9 +29,6 @@ func TestMarshal(t *testing.T) {
 	for k, v := range map[any]string{
 		jsonMarshal{}:       "jsonMarshal",
 		reqMarshal{}:        "reqMarshal",
-		reader{}:            "reader",
-		stringer{}:          "stringer",
-		goStringer{}:        "goStringer",
 		"str":               "str",
 		true:                "true",
 		false:               "false",

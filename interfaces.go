@@ -26,33 +26,32 @@ func (Post) Method() string {
 
 type PostForm struct {
 	Post
-	ContentType string `api:"header;application/x-www-form-urlencoded" json:"Content-Type"`
 }
+
+func (PostForm) UseFormBody() {}
+
+type postForm interface {
+	UseFormBody()
+}
+
+var _ postForm = (*PostForm)(nil)
 
 type PostJson struct {
 	Post
-	ContentType string `api:"header;application/json" json:"Content-Type"`
 }
 
-func (PostJson) JsonBody() {}
+func (PostJson) UseJsonBody() {}
 
 type postJson interface {
-	JsonBody()
+	UseJsonBody()
 }
 
 var _ postJson = (*PostJson)(nil)
-
-type JsonBody map[string]string
-
-func (m JsonBody) Add(key, value string) {
-	m[key] = value
-}
 
 type Adder interface {
 	Add(string, string)
 }
 
-var _ Adder = (*JsonBody)(nil)
 var _ Adder = (*url.Values)(nil)
 var _ Adder = (*http.Header)(nil)
 
@@ -62,3 +61,7 @@ type NamedReader interface {
 }
 
 var _ NamedReader = (*os.File)(nil)
+
+type Unwrap interface {
+	Unwrap() error
+}

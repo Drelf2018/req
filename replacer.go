@@ -2,16 +2,29 @@ package req
 
 import "strings"
 
-var replacer *strings.Replacer
+var (
+	keyReplacer   *strings.Replacer
+	headerReplace *strings.Replacer
+)
 
 func init() {
-	oldnew := []string{"ID", "_id"}
+	oldnew1 := []string{"ID", "_id"}
 	for i := 'A'; i <= 'Z'; i++ {
-		oldnew = append(oldnew, string(i), "_"+string(i+32))
+		oldnew1 = append(oldnew1, string(i)+"ID", "_"+string(i+32)+"id", string(i), "_"+string(i+32))
 	}
-	replacer = strings.NewReplacer(oldnew...)
+	keyReplacer = strings.NewReplacer(oldnew1...)
+
+	oldnew2 := make([]string, 26*2)
+	for i := 'A'; i <= 'Z'; i++ {
+		oldnew2 = append(oldnew2, string(i), "-"+string(i))
+	}
+	headerReplace = strings.NewReplacer(oldnew2...)
 }
 
-func Replace(s string) string {
-	return replacer.Replace(s)[1:]
+func KeyReplace(s string) string {
+	return keyReplacer.Replace(s)[1:]
+}
+
+func HeaderReplace(s string) string {
+	return headerReplace.Replace(s)[1:]
 }
