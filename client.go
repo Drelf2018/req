@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path"
 	"reflect"
 	"strings"
 )
@@ -38,6 +39,24 @@ type Client struct {
 	Default map[string]any
 }
 
+func (c *Client) SetAuthorization(auth string) {
+	if c.Header == nil {
+		c.Header = make(http.Header)
+	}
+	c.Header.Set("Authorization", auth)
+}
+
+func (c *Client) Authorization() (auth string) {
+	return c.Header.Get("Authorization")
+}
+
+func (c *Client) DefaultValue(key string) any {
+	if c.Default == nil {
+		return nil
+	}
+	return c.Default[key]
+}
+
 func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 	field, err := v.FieldByIndexErr(data.Index)
 	if err != nil {
@@ -45,9 +64,12 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 	}
 
 	if field.IsZero() {
-		if !data.Omit {
+		if data.Omit {
+			return nil
+		}
+		if data.Value != "" {
 			if strings.HasPrefix(data.Value, "$") {
-				s, err := Marshal(c.Default[data.Value])
+				s, err := Marshal(c.DefaultValue(data.Value))
 				if err != nil {
 					return err
 				}
@@ -55,8 +77,8 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 			} else {
 				adder.Add(data.Key, data.Value)
 			}
+			return nil
 		}
-		return nil
 	}
 
 	switch field.Kind() {
@@ -84,7 +106,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		v           = reflect.ValueOf(api)
 		task        = LoadTask(api)
 		body        io.Reader
-		ContentType string
+		contentType string
 	)
 	// data
 	if task.Files != nil {
@@ -116,10 +138,14 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			if errNil != nil {
 				return nil, errNil
 			}
+
 			if field.IsZero() {
-				if !data.Omit {
+				if data.Omit {
+					continue
+				}
+				if data.Value != "" {
 					if strings.HasPrefix(data.Value, "$") {
-						s, err = Marshal(c.Default[data.Value])
+						s, err = Marshal(c.DefaultValue(data.Value))
 						if err != nil {
 							return
 						}
@@ -130,8 +156,8 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					if err != nil {
 						return
 					}
+					continue
 				}
-				continue
 			}
 
 			switch field.Kind() {
@@ -163,7 +189,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			return
 		}
 		body = buf
-		ContentType = w.FormDataContentType()
+		contentType = w.FormDataContentType()
 	} else if task.Body != nil {
 		if _, isJson := api.(postJson); isJson {
 			m := make(map[string]any)
@@ -172,17 +198,22 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 				if errNil != nil {
 					return nil, errNil
 				}
+
 				if field.IsZero() {
-					if !data.Omit {
+					if data.Omit {
+						continue
+					}
+					if data.Value != "" {
 						if strings.HasPrefix(data.Value, "$") {
-							m[data.Key] = c.Default[data.Value]
+							m[data.Key] = c.DefaultValue(data.Value)
 						} else {
 							m[data.Key] = data.Value
 						}
+						continue
 					}
-				} else {
-					m[data.Key] = field.Interface()
 				}
+
+				m[data.Key] = field.Interface()
 			}
 
 			buf := &bytes.Buffer{}
@@ -192,7 +223,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			}
 
 			body = buf
-			ContentType = "application/json"
+			contentType = "application/json"
 		} else {
 			values := make(url.Values)
 			for _, data := range task.Body {
@@ -204,12 +235,12 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 
 			body = strings.NewReader(values.Encode())
 			if _, isForm := api.(postForm); isForm {
-				ContentType = "application/x-www-form-urlencoded"
+				contentType = "application/x-www-form-urlencoded"
 			}
 		}
 	}
 	// new request
-	req, err = http.NewRequestWithContext(ctx, api.Method(), c.BaseURL+api.URL(), body)
+	req, err = http.NewRequestWithContext(ctx, api.Method(), path.Join(c.BaseURL, api.URL()), body)
 	if err != nil {
 		return
 	}
@@ -229,8 +260,8 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		req.Header = c.Header.Clone()
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	if ContentType != "" {
-		req.Header.Set("Content-Type", ContentType)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	for _, data := range task.Header {
 		err = c.add(req.Header, data, v)
