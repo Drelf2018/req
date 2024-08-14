@@ -80,7 +80,9 @@ var taskCache sync.Map
 
 func NewTask(typ reflect.Type) *Task {
 	var task Task
-	task.Parse(typ, nil)
+	if typ.Kind() == reflect.Struct {
+		task.Parse(typ, nil)
+	}
 	return &task
 }
 
