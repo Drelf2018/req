@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"path"
 	"reflect"
 	"strings"
 )
@@ -33,8 +32,8 @@ func WriteFile(w *multipart.Writer, fieldname string, filename string, file io.R
 }
 
 type Client struct {
-	http.Client
-	BaseURL string
+	Client  http.Client
+	BaseURL *url.URL
 	Header  http.Header
 	Default map[string]any
 }
@@ -47,7 +46,24 @@ func (c *Client) SetAuthorization(auth string) {
 }
 
 func (c *Client) Authorization() (auth string) {
+	if c.Header == nil {
+		return ""
+	}
 	return c.Header.Get("Authorization")
+}
+
+func (c *Client) SetUserAgent(val string) {
+	if c.Header == nil {
+		c.Header = make(http.Header)
+	}
+	c.Header.Set("User-Agent", val)
+}
+
+func (c *Client) UserAgent() string {
+	if c.Header == nil {
+		return ""
+	}
+	return c.Header.Get("User-Agent")
 }
 
 func (c *Client) DefaultValue(key string) any {
@@ -103,7 +119,7 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 
 func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.Request, err error) {
 	var (
-		v           = reflect.ValueOf(api)
+		val         = reflect.ValueOf(api)
 		task        = LoadTask(api)
 		body        io.Reader
 		contentType string
@@ -113,10 +129,11 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		buf := &bytes.Buffer{}
 		w := multipart.NewWriter(buf)
 
+		var field reflect.Value
 		for _, data := range task.Files {
-			field, errNil := v.FieldByIndexErr(data.Index)
-			if errNil != nil {
-				return nil, errNil
+			field, err = val.FieldByIndexErr(data.Index)
+			if err != nil {
+				return
 			}
 			if field.IsZero() {
 				continue
@@ -134,11 +151,10 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 
 		var s string
 		for _, data := range task.Body {
-			field, errNil := v.FieldByIndexErr(data.Index)
-			if errNil != nil {
-				return nil, errNil
+			field, err = val.FieldByIndexErr(data.Index)
+			if err != nil {
+				return
 			}
-
 			if field.IsZero() {
 				if data.Omit {
 					continue
@@ -159,7 +175,6 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					continue
 				}
 			}
-
 			switch field.Kind() {
 			case reflect.Array, reflect.Slice:
 				for i := 0; i < field.Len(); i++ {
@@ -193,12 +208,13 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 	} else if task.Body != nil {
 		if _, isJson := api.(postJson); isJson {
 			m := make(map[string]any)
-			for _, data := range task.Body {
-				field, errNil := v.FieldByIndexErr(data.Index)
-				if errNil != nil {
-					return nil, errNil
-				}
 
+			var field reflect.Value
+			for _, data := range task.Body {
+				field, err = val.FieldByIndexErr(data.Index)
+				if err != nil {
+					return
+				}
 				if field.IsZero() {
 					if data.Omit {
 						continue
@@ -212,7 +228,6 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 						continue
 					}
 				}
-
 				m[data.Key] = field.Interface()
 			}
 
@@ -227,7 +242,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		} else {
 			values := make(url.Values)
 			for _, data := range task.Body {
-				err = c.add(values, data, v)
+				err = c.add(values, data, val)
 				if err != nil {
 					return
 				}
@@ -240,7 +255,11 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		}
 	}
 	// new request
-	req, err = http.NewRequestWithContext(ctx, api.Method(), path.Join(c.BaseURL, api.URL()), body)
+	if c.BaseURL != nil {
+		req, err = http.NewRequestWithContext(ctx, api.Method(), c.BaseURL.JoinPath(api.URL()).String(), body)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, api.Method(), api.URL(), body)
+	}
 	if err != nil {
 		return
 	}
@@ -248,7 +267,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 	if task.Query != nil {
 		query := make(url.Values)
 		for _, data := range task.Query {
-			err = c.add(query, data, v)
+			err = c.add(query, data, val)
 			if err != nil {
 				return
 			}
@@ -259,12 +278,11 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 	if c.Header != nil {
 		req.Header = c.Header.Clone()
 	}
-	req.Header.Set("User-Agent", UserAgent)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
 	for _, data := range task.Header {
-		err = c.add(req.Header, data, v)
+		err = c.add(req.Header, data, val)
 		if err != nil {
 			return
 		}
@@ -305,4 +323,14 @@ func (c *Client) Do(api Api, result any) (err error) {
 	return c.DoWithContext(context.Background(), api, result)
 }
 
-var DefaultClient = &Client{}
+func (c *Client) Debug(api Api) (m map[string]any, err error) {
+	m = make(map[string]any)
+	err = c.Do(api, &m)
+	return
+}
+
+var DefaultClient = &Client{
+	Header: http.Header{
+		"User-Agent": {UserAgent},
+	},
+}
