@@ -62,25 +62,13 @@ func (e *ErrMessage) Unwrap() error {
 	return fmt.Errorf("dto: %s(%d, %d)", e.Message, e.Code, e.ErrCode)
 }
 
-type GatewayResponse struct {
+var gateway = req.GetURL[struct {
 	*ErrMessage
 	URL string `json:"url"`
-}
-
-type Gateway struct {
-	req.Get
-}
-
-func (Gateway) URL() string {
-	return "https://api.sgroup.qq.com/gateway"
-}
-
-func (api Gateway) Do() (GatewayResponse, error) {
-	return req.Do[GatewayResponse](api)
-}
+}]("https://api.sgroup.qq.com/gateway")
 
 func TestGateway(t *testing.T) {
-	data, err := Gateway{}.Do()
+	data, err := gateway.Do()
 	if err == nil {
 		t.Fatal(data)
 	}
