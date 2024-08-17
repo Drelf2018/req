@@ -118,6 +118,13 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 }
 
 func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.Request, err error) {
+	// initial
+	if i, isBefore := api.(BeforeRequest); isBefore {
+		err = i.BeforeRequest(ctx, c)
+		if err != nil {
+			return
+		}
+	}
 	var (
 		val         = reflect.ValueOf(api)
 		task        = LoadTask(api)

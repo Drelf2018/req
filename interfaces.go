@@ -1,6 +1,7 @@
 package req
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/url"
@@ -64,4 +65,8 @@ var _ NamedReader = (*os.File)(nil)
 
 type Unwrap interface {
 	Unwrap() error
+}
+
+type BeforeRequest interface {
+	BeforeRequest(context.Context, *Client) error
 }
