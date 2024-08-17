@@ -345,6 +345,70 @@ func (c *Client) Debug(api Api) (m map[string]any, err error) {
 	return
 }
 
+func (c *Client) ContentWithContext(ctx context.Context, api Api) ([]byte, error) {
+	req, err := c.NewRequestWithContext(ctx, api)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
+func (c *Client) Content(api Api) ([]byte, error) {
+	return c.ContentWithContext(context.Background(), api)
+}
+
+func (c *Client) TextWithContext(ctx context.Context, api Api) (string, error) {
+	p, err := c.ContentWithContext(ctx, api)
+	if err != nil {
+		return "", err
+	}
+	return string(p), nil
+}
+
+func (c *Client) Text(api Api) (string, error) {
+	return c.TextWithContext(context.Background(), api)
+}
+
+func (c *Client) CURL(api Api) (string, error) {
+	req, err := c.NewRequest(api)
+	if err != nil {
+		return "", err
+	}
+	w := bytes.NewBufferString("curl")
+	if req.Body != nil {
+		defer req.Body.Close()
+		w.WriteString(" -d '")
+		_, err = w.ReadFrom(req.Body)
+		if err != nil {
+			return "", err
+		}
+		w.WriteByte('\'')
+	}
+	for key, values := range req.Header {
+		for _, value := range values {
+			w.WriteString(" -H '")
+			w.WriteString(key)
+			w.WriteString(": ")
+			w.WriteString(value)
+			w.WriteByte('\'')
+		}
+	}
+	if req.Method != http.MethodGet {
+		w.WriteString(" -X ")
+		w.WriteString(req.Method)
+	}
+	w.WriteByte(' ')
+	w.WriteString(req.URL.String())
+	return w.String(), nil
+}
+
 var DefaultClient = &Client{
 	Header: http.Header{
 		"User-Agent": {UserAgent},
