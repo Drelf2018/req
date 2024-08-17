@@ -1,21 +1,21 @@
 package req_test
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/Drelf2018/req"
 )
 
 func TestReplace(t *testing.T) {
-	typ := reflect.TypeFor[sendDanmaku]()
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		name := field.Name
-		if field.Tag.Get("api") == "header" {
-			t.Log(name, "->", req.HeaderReplace(name))
-		} else {
-			t.Log(name, "->", req.KeyReplace(name))
+	assert := func(fn func(string) string, name, val string) {
+		s := fn(name)
+		if s != val {
+			t.Fatalf("replace error: %s[want: %s get: %s]", name, val, s)
 		}
 	}
+	assert(req.HeaderReplace, "AcceptLanguage", "Accept-Language")
+	assert(req.KeyReplace, "Mode", "mode")
+	assert(req.KeyReplace, "PostJson", "post_json")
+	assert(req.KeyReplace, "ID", "id")              // not i_d
+	assert(req.KeyReplace, "ReplyMID", "reply_mid") // not reply_m_id
 }

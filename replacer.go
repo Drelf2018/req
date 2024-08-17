@@ -3,8 +3,8 @@ package req
 import "strings"
 
 var (
-	keyReplacer   *strings.Replacer
-	headerReplace *strings.Replacer
+	keyReplacer    *strings.Replacer
+	headerReplacer *strings.Replacer
 )
 
 func init() {
@@ -14,11 +14,11 @@ func init() {
 	}
 	keyReplacer = strings.NewReplacer(oldnew1...)
 
-	oldnew2 := make([]string, 26*2)
+	oldnew2 := make([]string, 0, 26*2)
 	for i := 'A'; i <= 'Z'; i++ {
 		oldnew2 = append(oldnew2, string(i), "-"+string(i))
 	}
-	headerReplace = strings.NewReplacer(oldnew2...)
+	headerReplacer = strings.NewReplacer(oldnew2...)
 }
 
 func KeyReplace(s string) string {
@@ -26,5 +26,5 @@ func KeyReplace(s string) string {
 }
 
 func HeaderReplace(s string) string {
-	return headerReplace.Replace(s)[1:]
+	return headerReplacer.Replace(s)[1:]
 }
