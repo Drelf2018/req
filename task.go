@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 type Field struct {
@@ -76,15 +77,18 @@ func (task *Task) Parse(typ reflect.Type, index []int) {
 	}
 }
 
-var taskCache sync.Map
-
 func NewTask(typ reflect.Type) *Task {
 	var task Task
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
 	if typ.Kind() == reflect.Struct {
 		task.Parse(typ, nil)
 	}
 	return &task
 }
+
+var taskCache sync.Map
 
 func LoadTask(in any) *Task {
 	ptr := TypePtr(in)
@@ -96,14 +100,6 @@ func LoadTask(in any) *Task {
 	return task
 }
 
-func LoadTaskByType(typ reflect.Type) *Task {
-	ptr := ValuePtr(typ)
-	if v, ok := taskCache.Load(ptr); ok {
-		return v.(*Task)
-	}
-	task := NewTask(typ)
-	taskCache.Store(ptr, task)
-	return task
 type Any struct {
 	Type  unsafe.Pointer
 	Value unsafe.Pointer
