@@ -104,4 +104,18 @@ func LoadTaskByType(typ reflect.Type) *Task {
 	task := NewTask(typ)
 	taskCache.Store(ptr, task)
 	return task
+type Any struct {
+	Type  unsafe.Pointer
+	Value unsafe.Pointer
+}
+
+func TypePtr(in any) uintptr {
+	return uintptr((*Any)(unsafe.Pointer(&in)).Type)
+}
+
+// notice this (user is an arbitrary struct)
+//
+//	TypePtr(user{}) == ValuePtr(reflect.TypeFor[user]())
+func ValuePtr(in any) uintptr {
+	return uintptr((*Any)(unsafe.Pointer(&in)).Value)
 }
