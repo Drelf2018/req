@@ -12,6 +12,7 @@ import (
 	"strings"
 )
 
+const Omitempty string = "omitempty"
 const UserAgent string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.54"
 
 func WriteFile(w *multipart.Writer, fieldname string, filename string, file io.Reader) error {
@@ -35,7 +36,27 @@ type Client struct {
 	Client  http.Client
 	BaseURL *url.URL
 	Header  http.Header
-	Default map[string]any
+
+	// Client will use the value in Variables when the Field's Value starts with "$"
+	Variables map[string]any
+}
+
+func (c *Client) value(key string) any {
+	if c.Variables == nil {
+		return nil
+	}
+	if strings.HasPrefix(key, "$") {
+		return c.Variables[key]
+	}
+	return nil
+}
+
+func (c *Client) valueString(key string) (string, error) {
+	i := c.value(key)
+	if i != nil {
+		return Marshal(i)
+	}
+	return key, nil
 }
 
 func (c *Client) SetAuthorization(auth string) {
@@ -66,13 +87,6 @@ func (c *Client) UserAgent() string {
 	return c.Header.Get("User-Agent")
 }
 
-func (c *Client) DefaultValue(key string) any {
-	if c.Default == nil {
-		return nil
-	}
-	return c.Default[key]
-}
-
 func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 	field, err := v.FieldByIndexErr(data.Index)
 	if err != nil {
@@ -84,15 +98,11 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 			return nil
 		}
 		if data.Value != "" {
-			if strings.HasPrefix(data.Value, "$") {
-				s, err := Marshal(c.DefaultValue(data.Value))
-				if err != nil {
-					return err
-				}
-				adder.Add(data.Key, s)
-			} else {
-				adder.Add(data.Key, data.Value)
+			s, err := c.valueString(data.Value)
+			if err != nil {
+				return err
 			}
+			adder.Add(data.Key, s)
 			return nil
 		}
 	}
@@ -125,9 +135,10 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			return
 		}
 	}
+	// load task
+	val := reflect.Indirect(reflect.ValueOf(api))
+	task := LoadTask(api)
 	var (
-		val         = reflect.ValueOf(api)
-		task        = LoadTask(api)
 		body        io.Reader
 		contentType string
 	)
@@ -167,13 +178,9 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					continue
 				}
 				if data.Value != "" {
-					if strings.HasPrefix(data.Value, "$") {
-						s, err = Marshal(c.DefaultValue(data.Value))
-						if err != nil {
-							return
-						}
-					} else {
-						s = data.Value
+					s, err = c.valueString(data.Value)
+					if err != nil {
+						return
 					}
 					err = w.WriteField(data.Key, s)
 					if err != nil {
@@ -227,8 +234,9 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 						continue
 					}
 					if data.Value != "" {
-						if strings.HasPrefix(data.Value, "$") {
-							m[data.Key] = c.DefaultValue(data.Value)
+						i := c.value(data.Value)
+						if i != nil {
+							m[data.Key] = i
 						} else {
 							m[data.Key] = data.Value
 						}
@@ -243,7 +251,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			if err != nil {
 				return
 			}
-
+			buf.Truncate(buf.Len() - 1) // See the source code of (*json.Encoder).Encode
 			body = buf
 			contentType = "application/json"
 		} else {
@@ -262,10 +270,11 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		}
 	}
 	// new request
-	if c.BaseURL != nil {
-		req, err = http.NewRequestWithContext(ctx, api.Method(), c.BaseURL.JoinPath(api.URL()).String(), body)
+	u := api.URL()
+	if c.BaseURL != nil && strings.HasPrefix(u, "/") {
+		req, err = http.NewRequestWithContext(ctx, api.Method(), c.BaseURL.JoinPath(u).String(), body)
 	} else {
-		req, err = http.NewRequestWithContext(ctx, api.Method(), api.URL(), body)
+		req, err = http.NewRequestWithContext(ctx, api.Method(), u, body)
 	}
 	if err != nil {
 		return
