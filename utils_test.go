@@ -1,6 +1,7 @@
 package req_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,9 +11,9 @@ import (
 	"github.com/Drelf2018/req"
 )
 
-type Color string
+type color string
 
-func (c Color) MarshalString() (string, error) {
+func (c color) MarshalString() (string, error) {
 	i, err := strconv.ParseInt(strings.ReplaceAll(string(c), "#", ""), 16, 64)
 	if err != nil {
 		return "", err
@@ -20,14 +21,14 @@ func (c Color) MarshalString() (string, error) {
 	return strconv.FormatInt(i, 10), nil
 }
 
-var _ req.Marshaler = (*Color)(nil)
+var _ req.Marshaler = (*color)(nil)
 
 type sendDanmaku struct {
 	req.PostJson
 	UID            int      `api:"query"`
 	Mode           string   `api:"body;1"`
 	Msg            string   `api:"body"`
-	Color          Color    `api:"body;16777215"`
+	Color          color    `api:"body;16777215"`
 	ReplyMID       int      `api:"body,omitempty"`
 	List           []string `api:"body"`
 	File           *os.File `api:"files"`
@@ -38,10 +39,16 @@ func (sendDanmaku) URL() string {
 	return "https://httpbin.org/post"
 }
 
+func (api *sendDanmaku) BeforeRequest(context.Context, *req.Client) (err error) {
+	api.File, err = os.Open("go.mod")
+	api.Msg = "你好"
+	return
+}
+
+var _ req.BeforeRequest = (*sendDanmaku)(nil)
+
 func TestDebug(t *testing.T) {
-	api := sendDanmaku{UID: 12138, List: []string{"1", "1", "4"}, Color: "#FFFFFF", AcceptLanguage: "zh-CN"}
-	api.File, _ = os.Open("go.mod")
-	data, err := req.Debug(api)
+	data, err := req.Debug(&sendDanmaku{UID: 12138, List: []string{"1", "1", "4"}, Color: "#00FFFF", AcceptLanguage: "zh-CN"})
 	if err != nil {
 		t.Fatal(data, err)
 	}
@@ -59,18 +66,20 @@ func (e *ErrMessage) Unwrap() error {
 	if e == nil {
 		return nil
 	}
-	return fmt.Errorf("dto: %s(%d, %d)", e.Message, e.Code, e.ErrCode)
+	return fmt.Errorf("req_test: %s(%d, %d)", e.Message, e.Code, e.ErrCode)
 }
 
-var gateway = req.GetURL[struct {
+var gateway = TestApi("https://api.sgroup.qq.com/gateway")
+
+type gatewayResponse struct {
 	*ErrMessage
 	URL string `json:"url"`
-}]("https://api.sgroup.qq.com/gateway")
+}
 
 func TestGateway(t *testing.T) {
-	data, err := gateway.Do()
+	result, err := req.Do[gatewayResponse](gateway)
 	if err == nil {
-		t.Fatal(data)
+		t.Fatal(result)
 	}
-	t.Logf("%#v, %#v", data, data.ErrMessage)
+	t.Log(err)
 }
