@@ -9,19 +9,19 @@ import (
 )
 
 type Api interface {
-	URL() string
-	Method() string
+	ApiURL() string
+	ApiMethod() string
 }
 
 type Get struct{}
 
-func (Get) Method() string {
+func (Get) ApiMethod() string {
 	return http.MethodGet
 }
 
 type Post struct{}
 
-func (Post) Method() string {
+func (Post) ApiMethod() string {
 	return http.MethodPost
 }
 
@@ -69,4 +69,12 @@ type Unwrap interface {
 
 type BeforeRequest interface {
 	BeforeRequest(context.Context, *Client) error
+}
+
+type AfterNewTask interface {
+	AfterNewTask(*Task)
+}
+
+type ApiTag interface {
+	ApiTag() string
 }

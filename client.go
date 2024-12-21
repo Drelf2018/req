@@ -102,7 +102,7 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 			if err != nil {
 				return err
 			}
-			adder.Add(data.Key, s)
+			adder.Add(data.Name, s)
 			return nil
 		}
 	}
@@ -114,14 +114,14 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 			if err != nil {
 				return err
 			}
-			adder.Add(data.Key, s)
+			adder.Add(data.Name, s)
 		}
 	default:
 		s, err := Marshal(field.Interface())
 		if err != nil {
 			return err
 		}
-		adder.Add(data.Key, s)
+		adder.Add(data.Name, s)
 	}
 
 	return nil
@@ -158,9 +158,9 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			}
 			switch file := field.Interface().(type) {
 			case NamedReader:
-				err = WriteFile(w, data.Key, file.Name(), file)
+				err = WriteFile(w, data.Name, file.Name(), file)
 			case io.Reader:
-				err = WriteFile(w, data.Key, data.Value, file)
+				err = WriteFile(w, data.Name, data.Value, file)
 			}
 			if err != nil {
 				return
@@ -182,7 +182,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					if err != nil {
 						return
 					}
-					err = w.WriteField(data.Key, s)
+					err = w.WriteField(data.Name, s)
 					if err != nil {
 						return
 					}
@@ -196,7 +196,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					if err != nil {
 						return
 					}
-					err = w.WriteField(data.Key, s)
+					err = w.WriteField(data.Name, s)
 					if err != nil {
 						return
 					}
@@ -206,7 +206,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 				if err != nil {
 					return
 				}
-				err = w.WriteField(data.Key, s)
+				err = w.WriteField(data.Name, s)
 				if err != nil {
 					return
 				}
@@ -236,14 +236,14 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 					if data.Value != "" {
 						i := c.value(data.Value)
 						if i != nil {
-							m[data.Key] = i
+							m[data.Name] = i
 						} else {
-							m[data.Key] = data.Value
+							m[data.Name] = data.Value
 						}
 						continue
 					}
 				}
-				m[data.Key] = field.Interface()
+				m[data.Name] = field.Interface()
 			}
 
 			buf := &bytes.Buffer{}
@@ -251,7 +251,7 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 			if err != nil {
 				return
 			}
-			buf.Truncate(buf.Len() - 1) // See the source code of (*json.Encoder).Encode
+			buf.Truncate(buf.Len() - 1) // Seeing the source code of (*json.Encoder).Encode
 			body = buf
 			contentType = "application/json"
 		} else {
@@ -270,11 +270,11 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 		}
 	}
 	// new request
-	u := api.URL()
+	u := api.ApiURL()
 	if c.BaseURL != nil && strings.HasPrefix(u, "/") {
-		req, err = http.NewRequestWithContext(ctx, api.Method(), c.BaseURL.JoinPath(u).String(), body)
+		req, err = http.NewRequestWithContext(ctx, api.ApiMethod(), c.BaseURL.JoinPath(u).String(), body)
 	} else {
-		req, err = http.NewRequestWithContext(ctx, api.Method(), u, body)
+		req, err = http.NewRequestWithContext(ctx, api.ApiMethod(), u, body)
 	}
 	if err != nil {
 		return

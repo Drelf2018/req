@@ -29,3 +29,11 @@ func CURL(api Api) (string, error) {
 func Debug(api Api) (map[string]any, error) {
 	return DefaultClient.Debug(api)
 }
+
+func Content(api Api) ([]byte, error) {
+	return DefaultClient.Content(api)
+}
+
+func Text(api Api) (string, error) {
+	return DefaultClient.Text(api)
+}

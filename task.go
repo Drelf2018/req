@@ -11,9 +11,9 @@ import (
 type Field struct {
 	// index in Api struct
 	Index []int
-	// provided by json tag or parsed from the field name
-	Key string
-	// default value used when the field value is zero
+	// provided by "req" tag or parsed from the field's name
+	Name string
+	// default value used when the field's value is zero
 	Value string
 	// This field is ignored when it is zero, conflict with default value
 	Omit bool
@@ -28,7 +28,7 @@ type Task struct {
 
 var ioReader = reflect.TypeFor[io.Reader]()
 
-func (task *Task) Parse(typ reflect.Type, index []int) {
+func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
@@ -37,15 +37,19 @@ func (task *Task) Parse(typ reflect.Type, index []int) {
 		}
 
 		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			task.Parse(field.Type, append(index, field.Index[0]))
+			task.parse(field.Type, append(index, field.Index[0]), field.Tag.Get("api"))
 			continue
 		}
 
-		var v Field
 		api, ok := field.Tag.Lookup("api")
 		if !ok {
-			continue
+			if parentTag == "" {
+				continue
+			}
+			api = parentTag
 		}
+
+		var v Field
 		api, v.Value, _ = strings.Cut(api, ";")
 		api, v.Omit = strings.CutSuffix(api, ",omitempty")
 
@@ -53,16 +57,17 @@ func (task *Task) Parse(typ reflect.Type, index []int) {
 			continue
 		}
 
-		v.Key, ok = field.Tag.Lookup("json")
+		v.Index = append(index, field.Index[0])
+		v.Name, ok = field.Tag.Lookup("req")
 		if !ok {
 			if api == "header" {
-				v.Key = HeaderReplace(field.Name)
+				v.Name = HeaderReplace(field.Name)
+			} else if field.Name == strings.ToUpper(field.Name) {
+				v.Name = strings.ToLower(field.Name)
 			} else {
-				v.Key = KeyReplace(field.Name)
+				v.Name = NameReplace(field.Name)
 			}
 		}
-
-		v.Index = append(index, field.Index[0])
 
 		switch api {
 		case "body":
@@ -77,27 +82,41 @@ func (task *Task) Parse(typ reflect.Type, index []int) {
 	}
 }
 
-func NewTask(typ reflect.Type) *Task {
-	var task Task
+func NewTask(api Api) *Task {
+	typ := reflect.TypeOf(api)
 	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
+	var task Task
 	if typ.Kind() == reflect.Struct {
-		task.Parse(typ, nil)
+		if v, ok := api.(ApiTag); ok {
+			task.parse(typ, nil, v.ApiTag())
+		} else {
+			task.parse(typ, nil, "")
+		}
+	}
+	if v, ok := api.(AfterNewTask); ok {
+		v.AfterNewTask(&task)
 	}
 	return &task
 }
 
 var taskCache sync.Map
 
-func LoadTask(in any) *Task {
-	ptr := TypePtr(in)
+func LoadTask(api Api) *Task {
+	ptr := TypePtr(api)
 	if v, ok := taskCache.Load(ptr); ok {
 		return v.(*Task)
 	}
-	task := NewTask(reflect.TypeOf(in))
+	task := NewTask(api)
 	taskCache.Store(ptr, task)
 	return task
+}
+
+func PreloadTask(api ...Api) {
+	for _, i := range api {
+		taskCache.Store(TypePtr(i), NewTask(i))
+	}
 }
 
 type Any struct {
@@ -111,7 +130,7 @@ func TypePtr(in any) uintptr {
 
 // notice this (user is an arbitrary struct)
 //
-//	TypePtr(user{}) == ValuePtr(reflect.TypeFor[user]())
+//	TypePtr(user{}) === ValuePtr(reflect.TypeFor[user]())
 func ValuePtr(in any) uintptr {
 	return uintptr((*Any)(unsafe.Pointer(&in)).Value)
 }

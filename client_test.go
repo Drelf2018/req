@@ -26,11 +26,11 @@ func init() {
 // A minimum req.Api instance
 type TestApi string
 
-func (TestApi) Method() string {
+func (TestApi) ApiMethod() string {
 	return http.MethodGet
 }
 
-func (t TestApi) URL() string {
+func (t TestApi) ApiURL() string {
 	return string(t)
 }
 
@@ -64,7 +64,7 @@ type GetAppAccessToken struct {
 	ClientSecret string `api:"body;$secret" json:"clientSecret"`
 }
 
-func (GetAppAccessToken) URL() string {
+func (GetAppAccessToken) ApiURL() string {
 	return "https://bots.qq.com/app/getAppAccessToken"
 }
 

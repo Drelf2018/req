@@ -14,8 +14,9 @@ func TestReplace(t *testing.T) {
 		}
 	}
 	assert(req.HeaderReplace, "AcceptLanguage", "Accept-Language")
-	assert(req.KeyReplace, "Mode", "mode")
-	assert(req.KeyReplace, "PostJson", "post_json")
-	assert(req.KeyReplace, "ID", "id")              // not i_d
-	assert(req.KeyReplace, "ReplyMID", "reply_mid") // not reply_m_id
+	assert(req.NameReplace, "Mode", "mode")
+	assert(req.NameReplace, "PostJson", "post_json")
+	assert(req.NameReplace, "ID", "id")              // not i_d
+	assert(req.NameReplace, "ReplyMID", "reply_mid") // not reply_m_id
+	assert(req.NameReplace, "CSS", "post_json")
 }

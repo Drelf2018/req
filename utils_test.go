@@ -35,7 +35,7 @@ type sendDanmaku struct {
 	AcceptLanguage string   `api:"header"`
 }
 
-func (sendDanmaku) URL() string {
+func (sendDanmaku) ApiURL() string {
 	return "https://httpbin.org/post"
 }
 
