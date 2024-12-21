@@ -18,5 +18,4 @@ func TestReplace(t *testing.T) {
 	assert(req.NameReplace, "PostJson", "post_json")
 	assert(req.NameReplace, "ID", "id")              // not i_d
 	assert(req.NameReplace, "ReplyMID", "reply_mid") // not reply_m_id
-	assert(req.NameReplace, "CSS", "post_json")
 }

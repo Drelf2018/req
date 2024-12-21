@@ -1,7 +1,6 @@
 package req_test
 
 import (
-	"net/http"
 	"net/url"
 	"testing"
 
@@ -23,35 +22,41 @@ func init() {
 	client.SetUserAgent(req.UserAgent)
 }
 
-// A minimum req.Api instance
-type TestApi string
-
-func (TestApi) ApiMethod() string {
-	return http.MethodGet
+type minAPI struct {
+	req.Get
+	url string
 }
 
-func (t TestApi) ApiURL() string {
-	return string(t)
+func (m minAPI) RawURL() string {
+	return m.url
+}
+
+func MinAPI(url string) minAPI {
+	return minAPI{url: url}
 }
 
 func TestClient(t *testing.T) {
 	// url starts with "/": use BaseURL
-	m, err := client.Debug(TestApi("/baseurl"))
+	m, err := client.JSON(MinAPI("/baseurl"))
 	if err != nil {
 		t.Fatal(m, err)
 	}
-	t.Log("request 1:", m["url"]) // "https://httpbin.org/anything/baseurl"
+	if m.(map[string]any)["url"] != "https://httpbin.org/anything/baseurl" {
+		t.Fatal("request 1")
+	}
 
 	// url does not have a "/" prefix: BaseURL is not used
-	m, err = client.Debug(TestApi("https://httpbin.org/get?q=1"))
+	m, err = client.JSON(MinAPI("https://httpbin.org/get?q=1"))
 	if err != nil {
 		t.Fatal(m, err)
 	}
-	t.Log("request 2:", m["url"]) // "https://httpbin.org/get?q=1"
+	if m.(map[string]any)["url"] != "https://httpbin.org/get?q=1" {
+		t.Fatal("request 2")
+	}
 }
 
 func TestCURL(t *testing.T) {
-	s, err := client.CURL(TestApi("https://httpbin.org/get?q=1"))
+	s, err := client.CURL(MinAPI("https://httpbin.org/get?q=1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +64,15 @@ func TestCURL(t *testing.T) {
 }
 
 type GetAppAccessToken struct {
-	req.PostJson
-	AppID        string `api:"body;$appid" json:"appId"`
-	ClientSecret string `api:"body;$secret" json:"clientSecret"`
+	req.PostJSON
+	AppID        string `api:"body:$appid" req:"appId"`
+	ClientSecret string `api:"body:$secret" req:"clientSecret"`
+	Empty1       string `api:"body"`
+	Empty2       string `api:"body,omitempty"`
 }
 
-func (GetAppAccessToken) ApiURL() string {
-	return "https://bots.qq.com/app/getAppAccessToken"
+func (GetAppAccessToken) RawURL() string {
+	return "https://httpbin.org/post"
 }
 
 func TestVariables(t *testing.T) {

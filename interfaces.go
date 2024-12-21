@@ -8,46 +8,19 @@ import (
 	"os"
 )
 
-type Api interface {
-	ApiURL() string
-	ApiMethod() string
+type APIData interface {
+	RawURL() string
+	Method() string
 }
 
-type Get struct{}
-
-func (Get) ApiMethod() string {
-	return http.MethodGet
+type APICreator interface {
+	NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (*http.Request, error)
 }
 
-type Post struct{}
-
-func (Post) ApiMethod() string {
-	return http.MethodPost
+type API interface {
+	APIData
+	APICreator
 }
-
-type PostForm struct {
-	Post
-}
-
-func (PostForm) UseFormBody() {}
-
-type postForm interface {
-	UseFormBody()
-}
-
-var _ postForm = (*PostForm)(nil)
-
-type PostJson struct {
-	Post
-}
-
-func (PostJson) UseJsonBody() {}
-
-type postJson interface {
-	UseJsonBody()
-}
-
-var _ postJson = (*PostJson)(nil)
 
 type Adder interface {
 	Add(string, string)
@@ -65,16 +38,4 @@ var _ NamedReader = (*os.File)(nil)
 
 type Unwrap interface {
 	Unwrap() error
-}
-
-type BeforeRequest interface {
-	BeforeRequest(context.Context, *Client) error
-}
-
-type AfterNewTask interface {
-	AfterNewTask(*Task)
-}
-
-type ApiTag interface {
-	ApiTag() string
 }

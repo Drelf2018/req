@@ -4,44 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 )
 
-const Omitempty string = "omitempty"
-const UserAgent string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.54"
-
-func WriteFile(w *multipart.Writer, fieldname string, filename string, file io.Reader) error {
-	writer, err := w.CreateFormFile(fieldname, filename)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(writer, file)
-	if err != nil {
-		return err
-	}
-
-	if closer, ok := file.(io.Closer); ok {
-		return closer.Close()
-	}
-	return nil
-}
-
 type Client struct {
-	Client  http.Client
-	BaseURL *url.URL
-	Header  http.Header
-
-	// Client will use the value in Variables when the Field's Value starts with "$"
-	Variables map[string]any
+	http.Client
+	BaseURL   *url.URL
+	Header    http.Header
+	Variables map[string]any // Client will use the value in Variables when the Field's Value starts with "$"
 }
 
-func (c *Client) value(key string) any {
+func (c *Client) Value(key string) any {
 	if c.Variables == nil {
 		return nil
 	}
@@ -51,8 +30,8 @@ func (c *Client) value(key string) any {
 	return nil
 }
 
-func (c *Client) valueString(key string) (string, error) {
-	i := c.value(key)
+func (c *Client) ValueString(key string) (string, error) {
+	i := c.Value(key)
 	if i != nil {
 		return Marshal(i)
 	}
@@ -87,18 +66,25 @@ func (c *Client) UserAgent() string {
 	return c.Header.Get("User-Agent")
 }
 
-func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
+func (c *Client) URL(rawURL string) string {
+	if c.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
+		rawURL = c.BaseURL.JoinPath(rawURL).String()
+	}
+	return rawURL
+}
+
+func (c *Client) AddValue(adder Adder, data Field, v reflect.Value) error {
 	field, err := v.FieldByIndexErr(data.Index)
 	if err != nil {
 		return err
 	}
 
 	if field.IsZero() {
-		if data.Omit {
+		if data.Omitempty {
 			return nil
 		}
 		if data.Value != "" {
-			s, err := c.valueString(data.Value)
+			s, err := c.ValueString(data.Value)
 			if err != nil {
 				return err
 			}
@@ -127,178 +113,26 @@ func (c *Client) add(adder Adder, data Field, v reflect.Value) error {
 	return nil
 }
 
-func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.Request, err error) {
-	// initial
-	if i, isBefore := api.(BeforeRequest); isBefore {
-		err = i.BeforeRequest(ctx, c)
+func (c *Client) AddQuery(req *http.Request, query []Field, val reflect.Value) (err error) {
+	q := make(url.Values)
+	for _, data := range query {
+		err = c.AddValue(q, data, val)
 		if err != nil {
 			return
 		}
 	}
-	// load task
-	val := reflect.Indirect(reflect.ValueOf(api))
-	task := LoadTask(api)
-	var (
-		body        io.Reader
-		contentType string
-	)
-	// data
-	if task.Files != nil {
-		buf := &bytes.Buffer{}
-		w := multipart.NewWriter(buf)
-
-		var field reflect.Value
-		for _, data := range task.Files {
-			field, err = val.FieldByIndexErr(data.Index)
-			if err != nil {
-				return
-			}
-			if field.IsZero() {
-				continue
-			}
-			switch file := field.Interface().(type) {
-			case NamedReader:
-				err = WriteFile(w, data.Name, file.Name(), file)
-			case io.Reader:
-				err = WriteFile(w, data.Name, data.Value, file)
-			}
-			if err != nil {
-				return
-			}
-		}
-
-		var s string
-		for _, data := range task.Body {
-			field, err = val.FieldByIndexErr(data.Index)
-			if err != nil {
-				return
-			}
-			if field.IsZero() {
-				if data.Omit {
-					continue
-				}
-				if data.Value != "" {
-					s, err = c.valueString(data.Value)
-					if err != nil {
-						return
-					}
-					err = w.WriteField(data.Name, s)
-					if err != nil {
-						return
-					}
-					continue
-				}
-			}
-			switch field.Kind() {
-			case reflect.Array, reflect.Slice:
-				for i := 0; i < field.Len(); i++ {
-					s, err = Marshal(field.Index(i).Interface())
-					if err != nil {
-						return
-					}
-					err = w.WriteField(data.Name, s)
-					if err != nil {
-						return
-					}
-				}
-			default:
-				s, err = Marshal(field.Interface())
-				if err != nil {
-					return
-				}
-				err = w.WriteField(data.Name, s)
-				if err != nil {
-					return
-				}
-			}
-		}
-
-		err = w.Close()
-		if err != nil {
-			return
-		}
-		body = buf
-		contentType = w.FormDataContentType()
-	} else if task.Body != nil {
-		if _, isJson := api.(postJson); isJson {
-			m := make(map[string]any)
-
-			var field reflect.Value
-			for _, data := range task.Body {
-				field, err = val.FieldByIndexErr(data.Index)
-				if err != nil {
-					return
-				}
-				if field.IsZero() {
-					if data.Omit {
-						continue
-					}
-					if data.Value != "" {
-						i := c.value(data.Value)
-						if i != nil {
-							m[data.Name] = i
-						} else {
-							m[data.Name] = data.Value
-						}
-						continue
-					}
-				}
-				m[data.Name] = field.Interface()
-			}
-
-			buf := &bytes.Buffer{}
-			err = json.NewEncoder(buf).Encode(m)
-			if err != nil {
-				return
-			}
-			buf.Truncate(buf.Len() - 1) // Seeing the source code of (*json.Encoder).Encode
-			body = buf
-			contentType = "application/json"
-		} else {
-			values := make(url.Values)
-			for _, data := range task.Body {
-				err = c.add(values, data, val)
-				if err != nil {
-					return
-				}
-			}
-
-			body = strings.NewReader(values.Encode())
-			if _, isForm := api.(postForm); isForm {
-				contentType = "application/x-www-form-urlencoded"
-			}
-		}
+	if len(q) != 0 {
+		req.URL.RawQuery = q.Encode()
 	}
-	// new request
-	u := api.ApiURL()
-	if c.BaseURL != nil && strings.HasPrefix(u, "/") {
-		req, err = http.NewRequestWithContext(ctx, api.ApiMethod(), c.BaseURL.JoinPath(u).String(), body)
-	} else {
-		req, err = http.NewRequestWithContext(ctx, api.ApiMethod(), u, body)
-	}
-	if err != nil {
-		return
-	}
-	// query
-	if task.Query != nil {
-		query := make(url.Values)
-		for _, data := range task.Query {
-			err = c.add(query, data, val)
-			if err != nil {
-				return
-			}
-		}
-		req.URL.RawQuery = query.Encode()
-	}
-	// header
+	return
+}
+
+func (c *Client) AddHeader(req *http.Request, header []Field, val reflect.Value) (err error) {
 	if c.Header != nil {
 		req.Header = c.Header.Clone()
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	for _, data := range task.Header {
-		err = c.add(req.Header, data, val)
+	for _, data := range header {
+		err = c.AddValue(req.Header, data, val)
 		if err != nil {
 			return
 		}
@@ -306,18 +140,79 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api Api) (req *http.
 	return
 }
 
-func (c *Client) NewRequest(api Api) (req *http.Request, err error) {
-	return c.NewRequestWithContext(context.Background(), api)
+func (c *Client) AddBody(ctx context.Context, api APIData, body io.Reader) (*http.Request, error) {
+	return http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), body)
+}
+
+func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
+	req, err := api.NewRequestWithContext(ctx, c, api)
+	if err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) Do(api API) (*http.Response, error) {
+	req, err := api.NewRequestWithContext(context.Background(), c, api)
+	if err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
+	resp, err := c.DoWithContext(ctx, api)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func (c *Client) Content(api API) ([]byte, error) {
+	resp, err := c.Do(api)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func (c *Client) TextWithContext(ctx context.Context, api API) (string, error) {
+	p, err := c.ContentWithContext(ctx, api)
+	if err != nil {
+		return "", err
+	}
+	return string(p), nil
+}
+
+func (c *Client) Text(api API) (string, error) {
+	p, err := c.Content(api)
+	if err != nil {
+		return "", err
+	}
+	return string(p), nil
+}
+
+func (c *Client) WriteWithContext(ctx context.Context, api API, name string, perm os.FileMode) error {
+	p, err := c.ContentWithContext(ctx, api)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(name, p, perm)
+}
+
+func (c *Client) Write(api API, name string, perm os.FileMode) error {
+	p, err := c.Content(api)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(name, p, perm)
 }
 
 // result must be a pointer!
-func (c *Client) DoWithContext(ctx context.Context, api Api, result any) (err error) {
-	req, err := c.NewRequestWithContext(ctx, api)
-	if err != nil {
-		return
-	}
-
-	resp, err := c.Client.Do(req)
+func (c *Client) ResultWithContext(ctx context.Context, api API, result any) (err error) {
+	resp, err := c.DoWithContext(ctx, api)
 	if err != nil {
 		return
 	}
@@ -335,49 +230,22 @@ func (c *Client) DoWithContext(ctx context.Context, api Api, result any) (err er
 }
 
 // result must be a pointer!
-func (c *Client) Do(api Api, result any) (err error) {
-	return c.DoWithContext(context.Background(), api, result)
+func (c *Client) Result(api API, result any) error {
+	return c.ResultWithContext(context.Background(), api, result)
 }
 
-func (c *Client) Debug(api Api) (m map[string]any, err error) {
-	m = make(map[string]any)
-	err = c.Do(api, &m)
+func (c *Client) JSONWithContext(ctx context.Context, api API) (data any, err error) {
+	err = c.ResultWithContext(ctx, api, &data)
 	return
 }
 
-func (c *Client) ContentWithContext(ctx context.Context, api Api) ([]byte, error) {
-	req, err := c.NewRequestWithContext(ctx, api)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	return io.ReadAll(resp.Body)
+func (c *Client) JSON(api API) (data any, err error) {
+	err = c.Result(api, &data)
+	return
 }
 
-func (c *Client) Content(api Api) ([]byte, error) {
-	return c.ContentWithContext(context.Background(), api)
-}
-
-func (c *Client) TextWithContext(ctx context.Context, api Api) (string, error) {
-	p, err := c.ContentWithContext(ctx, api)
-	if err != nil {
-		return "", err
-	}
-	return string(p), nil
-}
-
-func (c *Client) Text(api Api) (string, error) {
-	return c.TextWithContext(context.Background(), api)
-}
-
-func (c *Client) CURL(api Api) (string, error) {
-	req, err := c.NewRequest(api)
+func (c *Client) CURL(api API) (string, error) {
+	req, err := api.NewRequestWithContext(context.Background(), c, api)
 	if err != nil {
 		return "", err
 	}
@@ -409,8 +277,57 @@ func (c *Client) CURL(api Api) (string, error) {
 	return w.String(), nil
 }
 
-var DefaultClient = &Client{
-	Header: http.Header{
-		"User-Agent": {UserAgent},
-	},
+func (c *Client) Struct(api API, name string) ([]byte, error) {
+	b, err := c.Content(api)
+	if err != nil {
+		return nil, err
+	}
+	return NewConverter().JSONToStruct(b, name)
+}
+
+var tmpl = `func %s%s(cli *req.Client, api %s) (result %sResponse, err error) {
+	err = cli.Result(api, &result)
+	return
+}`
+
+func (c *Client) Generate(filename string, api API) error {
+	name := reflect.TypeOf(api).Name()
+	b, err := c.Struct(api, name+"Response")
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	f.Write([]byte{'\n'})
+	_, err = f.Write(b)
+	if err != nil {
+		return err
+	}
+	f.Write([]byte{'\n', '\n'})
+	m := api.Method()
+	f.WriteString(fmt.Sprintf(tmpl, strings.ToUpper(m[:1])+strings.ToLower(m[1:]), name, name, name))
+	return f.Close()
+}
+
+func (c *Client) Clone(rawURL string) (*Client, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		Client:    c.Client,
+		BaseURL:   u,
+		Header:    c.Header.Clone(),
+		Variables: c.Variables,
+	}, nil
+}
+
+func (c *Client) MustClone(rawURL string) *Client {
+	cli, err := c.Clone(rawURL)
+	if err != nil {
+		panic(err)
+	}
+	return cli
 }

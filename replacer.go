@@ -1,6 +1,8 @@
 package req
 
-import "strings"
+import (
+	"strings"
+)
 
 var (
 	nameReplacer   *strings.Replacer
