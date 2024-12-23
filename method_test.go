@@ -129,14 +129,14 @@ func TestPostMultipartForm(t *testing.T) {
 	}
 }
 
-func testGenerate(t *testing.T) {
-	err := cli.Generate("method_test.go", PostJSON{MID: 114514})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// r, err := GetCard(cli, Card{MID: 114514})
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
-	// t.Log(r)
-}
+// func TestGenerate(t *testing.T) {
+// 	err := cli.Generate("method_test.go", PostJSON{MID: 114514})
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	r, err := GetCard(cli, Card{MID: 114514})
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	t.Log(r)
+// }

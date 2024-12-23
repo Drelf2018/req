@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -144,20 +143,62 @@ func (c *Client) AddBody(ctx context.Context, api APIData, body io.Reader) (*htt
 	return http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), body)
 }
 
+func (c *Client) URLValues(fields []Field, val reflect.Value) (v url.Values, err error) {
+	v = make(url.Values)
+	for _, data := range fields {
+		err = c.AddValue(v, data, val)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (c *Client) JSONMap(body []Field, value reflect.Value) (m map[string]any, err error) {
+	m = make(map[string]any)
+	var field reflect.Value
+	for _, data := range body {
+		field, err = value.FieldByIndexErr(data.Index)
+		if err != nil {
+			return
+		}
+		if field.IsZero() {
+			if data.Omitempty {
+				continue
+			}
+			if data.Value != "" {
+				i := c.Value(data.Value)
+				if i != nil {
+					m[data.Name] = i
+				} else {
+					m[data.Name] = data.Value
+				}
+				continue
+			}
+		}
+		m[data.Name] = field.Interface()
+	}
+	return
+}
+
+func do(c http.Client, req *http.Request, jar CookieJar) (*http.Response, error) {
+	c.Jar = jar
+	return c.Do(req)
+}
+
 func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
 	req, err := api.NewRequestWithContext(ctx, c, api)
 	if err != nil {
 		return nil, err
 	}
+	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
+		return do(c.Client, req, jar)
+	}
 	return c.Client.Do(req)
 }
 
 func (c *Client) Do(api API) (*http.Response, error) {
-	req, err := api.NewRequestWithContext(context.Background(), c, api)
-	if err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
+	return c.DoWithContext(context.Background(), api)
 }
 
 func (c *Client) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
@@ -282,13 +323,8 @@ func (c *Client) Struct(api API, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewConverter().JSONToStruct(b, name)
+	return NewConverter(true, true).JSONToStruct(b, name)
 }
-
-var tmpl = `func %s%s(cli *req.Client, api %s) (result %sResponse, err error) {
-	err = cli.Result(api, &result)
-	return
-}`
 
 func (c *Client) Generate(filename string, api API) error {
 	name := reflect.TypeOf(api).Name()
@@ -305,9 +341,6 @@ func (c *Client) Generate(filename string, api API) error {
 	if err != nil {
 		return err
 	}
-	f.Write([]byte{'\n', '\n'})
-	m := api.Method()
-	f.WriteString(fmt.Sprintf(tmpl, strings.ToUpper(m[:1])+strings.ToLower(m[1:]), name, name, name))
 	return f.Close()
 }
 

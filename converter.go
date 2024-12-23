@@ -3,13 +3,18 @@ package req
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/format"
-	"reflect"
+	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+var ErrInvalidDelim = errors.New("req: invalid delim")
+var ErrInvalidToken = errors.New("req: invalid token")
 
 var patternAllNumber = regexp.MustCompile(`^\d+$`)
 var pattern2 = regexp.MustCompile(`(^|[^a-zA-Z])([a-z]+)`)
@@ -126,29 +131,6 @@ func NormalizeName(name string) string {
 	return "NamingFailed"
 }
 
-func ParseType(i any) string {
-	switch i := i.(type) {
-	case nil:
-		return "any"
-	case time.Time:
-		return "time.Time"
-	case []any:
-		return "slice"
-	case map[string]any:
-		return "struct"
-	case float64:
-		if i-float64(int(i)) != 0 {
-			return "float64"
-		}
-		if i > -2147483648 && i < 2147483647 {
-			return "int"
-		}
-		return "int64"
-	default:
-		return reflect.TypeOf(i).Name()
-	}
-}
-
 func ParseNumberType(type1, type2 string) string {
 	switch {
 	case strings.HasPrefix(type1, "float"):
@@ -167,15 +149,87 @@ func ParseNumberType(type1, type2 string) string {
 	return "any"
 }
 
-type Converter struct {
-	buf *bytes.Buffer
-	tab int
+func ParseType(t any) (rtype string, comment string) {
+	switch t := t.(type) {
+	case json.Delim:
+		switch t {
+		case '{':
+			return "struct", fmt.Sprint(t)
+		case '[':
+			return "slice", fmt.Sprint(t)
+		}
+	case bool:
+		if t {
+			return "bool", "true"
+		} else {
+			return "bool", "false"
+		}
+	case float64:
+		return "float64", strconv.FormatFloat(t, 'f', -1, 32)
+	case json.Number:
+		comment = t.String()
+		if !strings.Contains(comment, ".") {
+			i, errAtoi := strconv.Atoi(comment)
+			if errAtoi == nil {
+				if i >= -2147483648 && i <= 2147483647 {
+					rtype = "int"
+				} else {
+					rtype = "int64"
+				}
+				return
+			}
+		}
+		_, errParse := strconv.ParseFloat(comment, 64)
+		if errParse == nil {
+			rtype = "float64"
+		} else {
+			rtype = "json.Number"
+		}
+		return
+	case string:
+		comment = "\"" + t + "\""
+		if new(time.Time).UnmarshalText([]byte(t)) == nil {
+			rtype = "time.Time"
+		} else {
+			rtype = "string"
+		}
+		return
+	case []any:
+		return "slice", ""
+	case []*object:
+		return "struct", ""
+	}
+	return "any", ""
 }
 
-type item struct {
-	val   any
-	omit  bool
-	count int
+// 单个字段
+type object struct {
+	key     string
+	rtype   string
+	omit    bool
+	count   int
+	value   any
+	comment string
+}
+
+func (o object) String() string {
+	return fmt.Sprintf("%s:%s", o.key, o.rtype)
+}
+
+func (o *object) Objects() []*object {
+	return o.value.([]*object)
+}
+
+func (o *object) Array() []any {
+	return o.value.([]any)
+}
+
+type Converter struct {
+	Any     bool
+	Comment bool
+	buf     *bytes.Buffer
+	dec     *json.Decoder
+	tab     int
 }
 
 func (c *Converter) Add(s string) {
@@ -188,108 +242,7 @@ func (c *Converter) AddTab() {
 	}
 }
 
-func (c *Converter) AddStruct(items map[string]*item) {
-	c.Add("struct {\n")
-	c.tab++
-	for key, item := range items {
-		c.AddTab()
-		c.Add(NormalizeName(key))
-		c.Add(" ")
-		comment := c.AddAny(item.val)
-		c.Add(" `json:\"")
-		c.Add(key)
-		if item.omit {
-			c.Add(",omitempty")
-		}
-		c.Add("\"`")
-		if comment != "" {
-			c.Add(" // ")
-			c.Add(comment)
-		}
-		c.Add("\n")
-	}
-	c.tab--
-	c.AddTab()
-	c.Add("}")
-}
-
-func (c *Converter) AddAny(i any) (comment string) {
-	switch i := i.(type) {
-	case []any:
-		length := len(i)
-		var rtype string
-		for idx := 0; idx < length; idx++ {
-			if rtype == "" {
-				rtype = ParseType(i[idx])
-			} else if ntype := ParseType(i[idx]); rtype != ntype {
-				rtype = ParseNumberType(ntype, rtype)
-				if rtype == "any" {
-					break
-				}
-			}
-		}
-		c.Add("[]")
-
-		switch rtype {
-		case "struct":
-			items := make(map[string]*item)
-			for idx := 0; idx < length; idx++ {
-				iter := reflect.ValueOf(i[idx]).MapRange()
-				for iter.Next() {
-					key := iter.Key().String()
-					if it, ok := items[key]; ok {
-						it.count++
-					} else {
-						items[key] = &item{
-							val:   iter.Value().Interface(),
-							count: 1,
-						}
-					}
-				}
-			}
-			for _, it := range items {
-				it.omit = it.count != length
-			}
-			c.AddStruct(items)
-			return ""
-		case "slice":
-			c.AddAny(i[0])
-			return fmt.Sprint(i)
-		case "":
-			c.Add("any")
-			return ""
-		default:
-			c.Add(rtype)
-			return fmt.Sprint(i)
-		}
-	case map[string]any:
-		items := make(map[string]*item)
-		for key, val := range i {
-			items[key] = &item{val: val}
-		}
-		c.AddStruct(items)
-		return ""
-	default:
-		rtype := ParseType(i)
-		c.Add(rtype)
-		if rtype == "string" {
-			s := i.(string)
-			if s == "" {
-				return "\"\""
-			} else {
-				return s
-			}
-		}
-		return fmt.Sprint(i)
-	}
-}
-
 func (c *Converter) JSONToStruct(b []byte, name string) ([]byte, error) {
-	var i any
-	err := json.Unmarshal(bytes.ReplaceAll(b, []byte(".0"), []byte(".1")), &i)
-	if err != nil {
-		return nil, err
-	}
 	name = NormalizeName(name)
 	if name == "" {
 		name = "AutoGenerated"
@@ -297,12 +250,220 @@ func (c *Converter) JSONToStruct(b []byte, name string) ([]byte, error) {
 	c.Add("type ")
 	c.Add(name)
 	c.Add(" ")
-	c.AddAny(i)
+	err := c.UnmarshalJSON(bytes.ReplaceAll(b, []byte(".0"), []byte(".1")))
+	if err != nil {
+		return nil, err
+	}
 	return format.Source(c.buf.Bytes())
 }
 
-func NewConverter() *Converter {
+func assert(dec *json.Decoder, token json.Delim) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if t, ok := t.(json.Delim); !ok || t != token {
+		return ErrInvalidDelim
+	}
+	return nil
+}
+
+func (c *Converter) UnmarshalJSON(data []byte) error {
+	c.dec = json.NewDecoder(bytes.NewReader(data))
+	c.dec.UseNumber()
+
+	err := assert(c.dec, '{')
+	if err != nil {
+		return err
+	}
+
+	objects, err := c.ParseObject([]*object{})
+	if err != nil {
+		return err
+	}
+
+	_, err = c.dec.Token()
+	if err != io.EOF {
+		return err
+	}
+
+	c.WriteObjects(objects)
+
+	return nil
+}
+
+func (c *Converter) ParseObject(objects []*object) ([]*object, error) {
+outer:
+	for c.dec.More() {
+		t, err := c.dec.Token()
+		if err != nil {
+			return nil, err
+		}
+
+		key, ok := t.(string)
+		if !ok {
+			return nil, ErrInvalidToken
+		}
+
+		// 已经保存过该字段
+		// 计数加 1
+		// 直接读取并舍弃它的 Value
+		for _, obj := range objects {
+			if obj.key == key {
+				obj.count++
+				_, err := c.ParseValue(nil)
+				if err != nil {
+					return nil, err
+				}
+				continue outer
+			}
+		}
+
+		// 获取值 并分析类型
+		value, err := c.ParseValue([]*object{})
+		if err != nil {
+			return nil, err
+		}
+
+		rtype, comment := ParseType(value)
+		if rtype == "any" && !c.Any {
+			rtype = "interface{}"
+		}
+
+		if objects != nil {
+			objects = append(objects, &object{
+				key:     key,
+				rtype:   rtype,
+				count:   1,
+				value:   value,
+				comment: comment,
+			})
+		}
+	}
+
+	return objects, assert(c.dec, '}')
+}
+
+func (c *Converter) ParseValue(objects []*object) (any, error) {
+	t, err := c.dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if t, ok := t.(json.Delim); ok {
+		switch t {
+		case '{':
+			return c.ParseObject(objects)
+		case '[':
+			return c.ParseArray()
+		}
+	}
+	return t, nil
+}
+
+func (c *Converter) ParseArray() (val []any, err error) {
+	length := 0
+	objects := make([]*object, 0)
+	for c.dec.More() {
+		length++
+		v, err := c.ParseValue(objects)
+		if err != nil {
+			return nil, err
+		}
+		if objs, ok := v.([]*object); ok {
+			objects = objs
+		} else {
+			val = append(val, v)
+		}
+	}
+	err = assert(c.dec, ']')
+	if err != nil {
+		return
+	}
+	if len(val) == 0 {
+		for _, obj := range objects {
+			obj.omit = obj.count != length
+		}
+	}
+	if len(objects) != 0 {
+		val = append(val, objects)
+	}
+	return
+}
+
+func (c *Converter) WriteObjects(objects []*object) (err error) {
+	c.Add("struct {\n")
+	c.tab++
+	for _, obj := range objects {
+		c.AddTab()
+		c.Add(NormalizeName(obj.key))
+		c.Add(" ")
+
+		switch obj.rtype {
+		case "struct":
+			err = c.WriteObjects(obj.Objects())
+		case "slice":
+			err = c.WriteArray(obj.Array())
+		default:
+			c.Add(obj.rtype)
+		}
+		if err != nil {
+			return nil
+		}
+
+		c.Add(" `json:\"")
+		c.Add(obj.key)
+		if obj.omit {
+			c.Add(",omitempty")
+		}
+		c.Add("\"`")
+		if c.Comment && obj.comment != "" {
+			c.Add(" // ")
+			c.Add(obj.comment)
+		}
+		c.Add("\n")
+	}
+	c.tab--
+	c.AddTab()
+	c.Add("}")
+	return nil
+}
+
+func (c *Converter) WriteArray(val []any) (err error) {
+	c.Add("[]")
+
+	// []struct
+	if len(val) == 1 {
+		if o, ok := val[0].([]*object); ok {
+			err = c.WriteObjects(o)
+			return
+		}
+	}
+
+	// []xxx
+	var rtype string
+	for idx := 0; idx < len(val); idx++ {
+		ntype, _ := ParseType(val[idx])
+		if rtype == "" {
+			rtype = ntype
+		} else if rtype != ntype {
+			rtype = ParseNumberType(ntype, rtype)
+			if rtype == "any" {
+				break
+			}
+		}
+	}
+
+	if rtype == "any" && !c.Any {
+		rtype = "interface{}"
+	}
+	c.Add(rtype)
+	return nil
+}
+
+func NewConverter(useAny bool, addComment bool) *Converter {
 	return &Converter{
-		buf: &bytes.Buffer{},
+		Any:     useAny,
+		Comment: addComment,
+		buf:     &bytes.Buffer{},
 	}
 }

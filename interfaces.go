@@ -39,3 +39,8 @@ var _ NamedReader = (*os.File)(nil)
 type Unwrap interface {
 	Unwrap() error
 }
+
+type CookieJar interface {
+	IsValid() bool
+	http.CookieJar
+}

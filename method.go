@@ -42,29 +42,9 @@ func (PostJSON) Method() string {
 func (PostJSON) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (req *http.Request, err error) {
 	task := LoadTask(api)
 	value := reflect.Indirect(reflect.ValueOf(api))
-
-	m := make(map[string]any)
-	var field reflect.Value
-	for _, data := range task.Body {
-		field, err = value.FieldByIndexErr(data.Index)
-		if err != nil {
-			return
-		}
-		if field.IsZero() {
-			if data.Omitempty {
-				continue
-			}
-			if data.Value != "" {
-				i := cli.Value(data.Value)
-				if i != nil {
-					m[data.Name] = i
-				} else {
-					m[data.Name] = data.Value
-				}
-				continue
-			}
-		}
-		m[data.Name] = field.Interface()
+	m, err := cli.JSONMap(task.Body, value)
+	if err != nil {
+		return
 	}
 	buf := &bytes.Buffer{}
 	err = json.NewEncoder(buf).Encode(m)
