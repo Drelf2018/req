@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 )
 
+// 向多部份写入器写入文件
 func WriteFormFile(w *multipart.Writer, fieldname string, filename string, file io.Reader) error {
 	writer, err := w.CreateFormFile(fieldname, filename)
 	if err != nil {
@@ -22,12 +23,21 @@ func WriteFormFile(w *multipart.Writer, fieldname string, filename string, file 
 	return nil
 }
 
+// 文件写入器
 type FileWriter interface {
 	Adder
 	io.Closer
+
+	// 初始化函数 可以做一些赋值操作
 	Initial() error
+
+	// 获取最终请求体
 	Reader() io.Reader
+
+	// 请求头 Content-Type
 	FormDataContentType() string
+
+	// 写入一个文件
 	Write(file io.Reader, data Field) error
 }
 
@@ -42,10 +52,12 @@ func (w *DefaultFileWriter) Initial() error {
 	return nil
 }
 
+// 添加普通键值对
 func (w *DefaultFileWriter) Add(key, val string) {
 	w.Writer.WriteField(key, val)
 }
 
+// 写入文件
 func (w *DefaultFileWriter) Write(file io.Reader, data Field) error {
 	switch file := file.(type) {
 	case NamedReader:

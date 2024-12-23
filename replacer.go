@@ -23,10 +23,12 @@ func init() {
 	headerReplacer = strings.NewReplacer(oldnew2...)
 }
 
+// 一般字段名替换器
 func NameReplace(s string) string {
 	return nameReplacer.Replace(s)[1:]
 }
 
+// 请求头字段名替换器
 func HeaderReplace(s string) string {
 	return headerReplacer.Replace(s)[1:]
 }

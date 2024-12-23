@@ -26,6 +26,7 @@ func ValuePtr(in any) uintptr {
 	return uintptr((*Any)(unsafe.Pointer(&in)).Value)
 }
 
+// 字段
 type Field struct {
 	Index     []int  // the index of the field in API object 表示这个字段在结构体中的索引，因为结构体可以嵌套所以有多层
 	Name      string // supplied by the "req" tag or parsed from the field name 表示这个字段要使用的名称，例如 json 中 key 的部分
@@ -33,6 +34,9 @@ type Field struct {
 	Omitempty bool   // ignored if the field is zero, conflicts with the default value 表示这个字段为空时要不要忽略这项
 }
 
+// 任务
+//
+// 包含了 API 结构体中所有有效字段信息
 type Task struct {
 	Body   []Field
 	Files  []Field
@@ -112,6 +116,7 @@ func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 	}
 }
 
+// 新建任务
 func NewTask(api APIData) *Task {
 	var task Task
 	apiType := reflect.TypeOf(api)
@@ -126,6 +131,9 @@ func NewTask(api APIData) *Task {
 
 var taskCache sync.Map //map[uintptr]*Task
 
+// 根据 API 加载任务
+//
+// 不存在则新建
 func LoadTask(api APIData) *Task {
 	ptr := TypePtr(api)
 	if v, ok := taskCache.Load(ptr); ok {
@@ -136,6 +144,7 @@ func LoadTask(api APIData) *Task {
 	return task
 }
 
+// 预加载任务
 func PreloadTask(api ...APIData) {
 	for _, i := range api {
 		taskCache.Store(TypePtr(i), NewTask(i))

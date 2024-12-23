@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"strings"
 )
 
+// 客户端
 type Client struct {
 	http.Client
 	BaseURL   *url.URL
@@ -19,6 +21,9 @@ type Client struct {
 	Variables map[string]any // Client will use the value in Variables when the Field's Value starts with "$"
 }
 
+// 获取 Variables 中的值
+//
+// 参数 key 必须以 "$" 开头
 func (c *Client) Value(key string) any {
 	if c.Variables == nil {
 		return nil
@@ -29,6 +34,7 @@ func (c *Client) Value(key string) any {
 	return nil
 }
 
+// 获取 Variables 中的值并转换成字符串
 func (c *Client) ValueString(key string) (string, error) {
 	i := c.Value(key)
 	if i != nil {
@@ -37,6 +43,7 @@ func (c *Client) ValueString(key string) (string, error) {
 	return key, nil
 }
 
+// 设置默认请求头 Authorization
 func (c *Client) SetAuthorization(auth string) {
 	if c.Header == nil {
 		c.Header = make(http.Header)
@@ -44,6 +51,7 @@ func (c *Client) SetAuthorization(auth string) {
 	c.Header.Set("Authorization", auth)
 }
 
+// 获取默认请求头 Authorization
 func (c *Client) Authorization() (auth string) {
 	if c.Header == nil {
 		return ""
@@ -51,6 +59,7 @@ func (c *Client) Authorization() (auth string) {
 	return c.Header.Get("Authorization")
 }
 
+// 设置默认请求头 User-Agent
 func (c *Client) SetUserAgent(val string) {
 	if c.Header == nil {
 		c.Header = make(http.Header)
@@ -58,6 +67,7 @@ func (c *Client) SetUserAgent(val string) {
 	c.Header.Set("User-Agent", val)
 }
 
+// 获取默认请求头 User-Agent
 func (c *Client) UserAgent() string {
 	if c.Header == nil {
 		return ""
@@ -65,6 +75,9 @@ func (c *Client) UserAgent() string {
 	return c.Header.Get("User-Agent")
 }
 
+// 拼接 BaseURL 和提供的 rawURL
+//
+// 当 rawURL 以 "/" 开头时才会拼接
 func (c *Client) URL(rawURL string) string {
 	if c.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
 		rawURL = c.BaseURL.JoinPath(rawURL).String()
@@ -72,6 +85,7 @@ func (c *Client) URL(rawURL string) string {
 	return rawURL
 }
 
+// 向 Adder 接口添加数据
 func (c *Client) AddValue(adder Adder, data Field, v reflect.Value) error {
 	field, err := v.FieldByIndexErr(data.Index)
 	if err != nil {
@@ -112,6 +126,7 @@ func (c *Client) AddValue(adder Adder, data Field, v reflect.Value) error {
 	return nil
 }
 
+// 向 req 请求添加请求参数
 func (c *Client) AddQuery(req *http.Request, query []Field, val reflect.Value) (err error) {
 	q := make(url.Values)
 	for _, data := range query {
@@ -126,11 +141,15 @@ func (c *Client) AddQuery(req *http.Request, query []Field, val reflect.Value) (
 	return
 }
 
+// 向 req 请求添加请求头
+//
+// 会使用 Client 中设置的默认请求头
 func (c *Client) AddHeader(req *http.Request, header []Field, val reflect.Value) (err error) {
 	if c.Header != nil {
 		req.Header = c.Header.Clone()
 	}
 	for _, data := range header {
+		req.Header[data.Name] = []string{}
 		err = c.AddValue(req.Header, data, val)
 		if err != nil {
 			return
@@ -139,11 +158,13 @@ func (c *Client) AddHeader(req *http.Request, header []Field, val reflect.Value)
 	return
 }
 
+// 获取 *http.Request 对象
 func (c *Client) AddBody(ctx context.Context, api APIData, body io.Reader) (*http.Request, error) {
 	return http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), body)
 }
 
-func (c *Client) URLValues(fields []Field, val reflect.Value) (v url.Values, err error) {
+// 根据提供的 []Field 制作 url.Values
+func (c *Client) MakeURLValues(fields []Field, val reflect.Value) (v url.Values, err error) {
 	v = make(url.Values)
 	for _, data := range fields {
 		err = c.AddValue(v, data, val)
@@ -154,7 +175,8 @@ func (c *Client) URLValues(fields []Field, val reflect.Value) (v url.Values, err
 	return
 }
 
-func (c *Client) JSONMap(body []Field, value reflect.Value) (m map[string]any, err error) {
+// 根据提供的 []Field 制作 map[string]any
+func (c *Client) MakeJSONMap(body []Field, value reflect.Value) (m map[string]any, err error) {
 	m = make(map[string]any)
 	var field reflect.Value
 	for _, data := range body {
@@ -186,6 +208,7 @@ func do(c http.Client, req *http.Request, jar CookieJar) (*http.Response, error)
 	return c.Do(req)
 }
 
+// 发送带上下文的请求
 func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
 	req, err := api.NewRequestWithContext(ctx, c, api)
 	if err != nil {
@@ -197,10 +220,12 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 	return c.Client.Do(req)
 }
 
+// 发送请求
 func (c *Client) Do(api API) (*http.Response, error) {
 	return c.DoWithContext(context.Background(), api)
 }
 
+// 获取带上下文的请求结果
 func (c *Client) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
 	resp, err := c.DoWithContext(ctx, api)
 	if err != nil {
@@ -210,6 +235,7 @@ func (c *Client) ContentWithContext(ctx context.Context, api API) ([]byte, error
 	return io.ReadAll(resp.Body)
 }
 
+// 获取请求结果
 func (c *Client) Content(api API) ([]byte, error) {
 	resp, err := c.Do(api)
 	if err != nil {
@@ -219,6 +245,7 @@ func (c *Client) Content(api API) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// 获取带上下文的请求结果字符串
 func (c *Client) TextWithContext(ctx context.Context, api API) (string, error) {
 	p, err := c.ContentWithContext(ctx, api)
 	if err != nil {
@@ -227,6 +254,7 @@ func (c *Client) TextWithContext(ctx context.Context, api API) (string, error) {
 	return string(p), nil
 }
 
+// 获取请求结果字符串
 func (c *Client) Text(api API) (string, error) {
 	p, err := c.Content(api)
 	if err != nil {
@@ -235,6 +263,7 @@ func (c *Client) Text(api API) (string, error) {
 	return string(p), nil
 }
 
+// 将带上下文的请求结果写入文件
 func (c *Client) WriteWithContext(ctx context.Context, api API, name string, perm os.FileMode) error {
 	p, err := c.ContentWithContext(ctx, api)
 	if err != nil {
@@ -243,6 +272,7 @@ func (c *Client) WriteWithContext(ctx context.Context, api API, name string, per
 	return os.WriteFile(name, p, perm)
 }
 
+// 将请求结果写入文件
 func (c *Client) Write(api API, name string, perm os.FileMode) error {
 	p, err := c.Content(api)
 	if err != nil {
@@ -251,7 +281,9 @@ func (c *Client) Write(api API, name string, perm os.FileMode) error {
 	return os.WriteFile(name, p, perm)
 }
 
-// result must be a pointer!
+// 将带上下文的请求结果以 JSON 格式解析进对象
+//
+// result 必须是指针
 func (c *Client) ResultWithContext(ctx context.Context, api API, result any) (err error) {
 	resp, err := c.DoWithContext(ctx, api)
 	if err != nil {
@@ -270,21 +302,26 @@ func (c *Client) ResultWithContext(ctx context.Context, api API, result any) (er
 	return
 }
 
-// result must be a pointer!
+// 将请求结果以 JSON 格式解析进对象
+//
+// result 必须是指针
 func (c *Client) Result(api API, result any) error {
 	return c.ResultWithContext(context.Background(), api, result)
 }
 
+// 将带上下文的请求结果以 JSON 格式解析进接口
 func (c *Client) JSONWithContext(ctx context.Context, api API) (data any, err error) {
 	err = c.ResultWithContext(ctx, api, &data)
 	return
 }
 
+// 将请求结果以 JSON 格式解析进接口
 func (c *Client) JSON(api API) (data any, err error) {
 	err = c.Result(api, &data)
 	return
 }
 
+// 生成 cURL
 func (c *Client) CURL(api API) (string, error) {
 	req, err := api.NewRequestWithContext(context.Background(), c, api)
 	if err != nil {
@@ -318,6 +355,7 @@ func (c *Client) CURL(api API) (string, error) {
 	return w.String(), nil
 }
 
+// 将请求结果改写成结构体
 func (c *Client) Struct(api API, name string) ([]byte, error) {
 	b, err := c.Content(api)
 	if err != nil {
@@ -326,6 +364,7 @@ func (c *Client) Struct(api API, name string) ([]byte, error) {
 	return NewConverter(true, true).JSONToStruct(b, name)
 }
 
+// 在指定文件写入请求结果改写的结构体
 func (c *Client) Generate(filename string, api API) error {
 	name := reflect.TypeOf(api).Name()
 	b, err := c.Struct(api, name+"Response")
@@ -341,9 +380,16 @@ func (c *Client) Generate(filename string, api API) error {
 	if err != nil {
 		return err
 	}
+	f.Write([]byte{'\n', '\n'})
+	m := api.Method()
+	f.WriteString(fmt.Sprintf(`func %s%s() (result %sResponse, err error) {
+	err = cli.Result(%s{}, &result)
+	return
+}`, strings.ToUpper(m[:1])+strings.ToLower(m[1:]), name, name, name))
 	return f.Close()
 }
 
+// 克隆客户端
 func (c *Client) Clone(rawURL string) (*Client, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -357,6 +403,7 @@ func (c *Client) Clone(rawURL string) (*Client, error) {
 	}, nil
 }
 
+// 必须克隆！
 func (c *Client) MustClone(rawURL string) *Client {
 	cli, err := c.Clone(rawURL)
 	if err != nil {

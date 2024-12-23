@@ -11,21 +11,30 @@ import (
 	"strings"
 )
 
+// GET 请求构造器
+//
+// 直接嵌入结构体即可使用
 type Get struct{}
 
 func (Get) Method() string {
 	return http.MethodGet
 }
 
+// 可以通过这个方法学习如何自己实现一个构造器
 func (Get) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (req *http.Request, err error) {
+	// 因为是 GET 请求所以不添加 body
 	req, err = cli.AddBody(ctx, api, nil)
 	if err != nil {
 		return
 	}
+	// 提取 API 中字段
 	task := LoadTask(api)
+	// 获取 API 的值(reflect.Value)以便后续添加参数
 	value := reflect.Indirect(reflect.ValueOf(api))
+	// 添加请求参数
 	err = cli.AddQuery(req, task.Query, value)
 	if err == nil {
+		// 添加请求头
 		err = cli.AddHeader(req, task.Header, value)
 	}
 	return
@@ -33,6 +42,7 @@ func (Get) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) 
 
 var _ APICreator = Get{}
 
+// 以 JSON 为请求体的 POST 请求构造器
 type PostJSON struct{}
 
 func (PostJSON) Method() string {
@@ -42,7 +52,7 @@ func (PostJSON) Method() string {
 func (PostJSON) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (req *http.Request, err error) {
 	task := LoadTask(api)
 	value := reflect.Indirect(reflect.ValueOf(api))
-	m, err := cli.JSONMap(task.Body, value)
+	m, err := cli.MakeJSONMap(task.Body, value)
 	if err != nil {
 		return
 	}
@@ -65,6 +75,7 @@ func (PostJSON) NewRequestWithContext(ctx context.Context, cli *Client, api APID
 
 var _ APICreator = PostJSON{}
 
+// 以 Form 表单为请求体的 POST 请求构造器
 type PostForm struct{}
 
 func (PostForm) Method() string {

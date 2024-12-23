@@ -9,6 +9,7 @@ type Marshaler interface {
 	MarshalString() (string, error)
 }
 
+// 小白马希洛
 func Marshal(i any) (string, error) {
 	if i == nil {
 		return "", nil
