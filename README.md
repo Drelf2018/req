@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/Drelf2018/webhook/">
-    <img src="./avatar.jpg" height="200" alt="req" style="border-radius:50%">
+    <img src="./avatar.png" height="200" alt="req">
   </a>
 </p>
 
