@@ -15,11 +15,11 @@ func Marshal(i any) (string, error) {
 		return "", nil
 	}
 	switch i := i.(type) {
+	case Marshaler:
+		return i.MarshalString()
 	case json.Marshaler:
 		b, err := i.MarshalJSON()
 		return string(b), err
-	case Marshaler:
-		return i.MarshalString()
 	case []byte:
 		return string(i), nil
 	case string:
