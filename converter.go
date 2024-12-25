@@ -522,6 +522,9 @@ func (c *Converter) WriteArray(val []any) (err error) {
 		}
 	}
 
+	if rtype == "" {
+		rtype = "any"
+	}
 	if rtype == "any" && !c.Any {
 		rtype = "interface{}"
 	}

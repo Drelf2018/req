@@ -1,6 +1,7 @@
 package req_test
 
 import (
+	"go/format"
 	"strings"
 	"testing"
 
@@ -251,5 +252,19 @@ func TestConverter(t *testing.T) {
 	answer = strings.NewReplacer("\r", "").Replace(answer[begin+10 : end])
 	if string(b) != answer {
 		t.Fail()
+	}
+}
+
+//go:embed m4.json
+var m4 []byte
+
+func TestM4(t *testing.T) {
+	b, err := req.NewConverter(true, true).JSONToStruct(m4, "AccInfoResponse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = format.Source(b)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
