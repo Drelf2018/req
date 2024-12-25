@@ -128,15 +128,3 @@ func TestPostMultipartForm(t *testing.T) {
 		t.Logf("%v: %v", key, value)
 	}
 }
-
-// func TestGenerate(t *testing.T) {
-// 	err := cli.Generate("method_test.go", PostJSON{MID: 114514})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	r, err := GetCard(cli, Card{MID: 114514})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	t.Log(r)
-// }

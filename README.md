@@ -404,42 +404,6 @@ func (c *Client) ValueString(key string) (string, error) {
 }
 ```
 
-### 为 `JSON` 格式响应体导出对应的结构体
-
-在 [client.go](./client.go) 中有 `(*Client).Generate` 方法，它会请求这个 `API` 并将返回结果以 `JSON` 格式解析，如果成功会再将该 `JSON` 转成 `go` 语言的结构体形式，最后追加写入给定文件中。该功能为实验性功能，不多作介绍，如想了解详情请看 [converter.go](./converter.go) 源码。
-
-```go
-func TestGenerate(t *testing.T) {
-	req.Generate("req_test.go", User{UID: "114514"})
-}
-
-// AutoGenerate ↓↓↓
-
-type UserResponse struct {
-	Args struct {
-	} `json:"args"`
-	Data  string `json:"data"` // ""
-	Files struct {
-	} `json:"files"`
-	Form struct {
-	} `json:"form"`
-	Headers struct {
-		AcceptEncoding string `json:"Accept-Encoding"` // "gzip"
-		Host           string `json:"Host"`            // "httpbin.org"
-		UserAgent      string `json:"User-Agent"`      // "Mozilla/5.1 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.1.1.1 Safari/537.36 Edg/116.1.1938.54"
-	} `json:"headers"`
-	JSON   any    `json:"json"`
-	Method string `json:"method"` // "GET"
-	Origin string `json:"origin"` // "xxx.xxx.xxx.xxx"
-	URL    string `json:"url"`    // "https://httpbin.org/anything/user/114514"
-}
-
-func GetUser() (result UserResponse, err error) {
-	err = cli.Result(User{}, &result)
-	return
-}
-```
-
 ### 标签 `api` 还能怎么用
 
 其实，标签的完全格式为 `api:(query|body|header|file|files)[:value][,omitempty]`
@@ -468,9 +432,117 @@ if field.IsZero() {
 }
 ```
 
+### 怎么上传文件
+
+在 [writer.go](./writer.go) 中定义了 `FileWriter` 接口。
+
+```go
+// 文件写入器
+type FileWriter interface {
+	Adder
+	io.Closer
+
+	// 初始化函数 可以做一些赋值操作
+	Initial() error
+
+	// 获取最终请求体
+	Reader() io.Reader
+
+	// 请求头 Content-Type
+	FormDataContentType() string
+
+	// 写入一个文件
+	Write(file io.Reader, data Field) error
+}
+```
+
+同时定义了一个具体实现 `DefaultFileWriter` 。
+
+```go
+// 命名的读取器
+type NamedReader interface {
+	io.Reader
+	Name() (filename string)
+}
+
+// 写入文件
+func (w *DefaultFileWriter) Write(file io.Reader, data Field) error {
+	switch file := file.(type) {
+	case NamedReader:
+		return WriteFormFile(w.Writer, filepath.Join(data.Name, file.Name()), file.Name(), file)
+	default:
+		return WriteFormFile(w.Writer, filepath.Join(data.Name, data.Value), data.Value, file)
+	}
+}
+```
+
+可以看到，之前经过判断实现了 `io.Reader` 的字段会被当做 `file io.Reader` 参数传入该方法，然后再写入请求。
+
+```go
+type file struct {
+	name  string
+	value string
+}
+
+func (f file) Name() string {
+	return f.name
+}
+
+func (f file) Read(p []byte) (n int, err error) {
+	return copy(p, []byte(f.value)), io.EOF
+}
+
+var _ req.NamedReader = file{}
+
+type Upload struct {
+	req.PostMultipartForm
+	FileA  file   `api:"file"`
+	FileB  file   `api:"file" req:"file_c"`
+	FilesC []file `api:"files"`
+	FilesD []file `api:"files" req:"upload/files_e"`
+}
+
+func (Upload) RawURL() string {
+	return "https://httpbin.org/post"
+}
+
+var _ req.API = Upload{}
+
+func TestPostMultipartForm(t *testing.T) {
+	var data = Upload{
+		FileA:  file{"a.txt", "hello A!"},
+		FileB:  file{"b.txt", "hello B!"},
+		FilesC: []file{ {"c1.txt", "hello C1!"}, {"c2.txt", "hello C2!"} },
+		FilesD: []file{ {"d1.txt", "hello D1!"}, {"d2.txt", "hello D2!"} },
+	}
+	r, err := cli.JSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := r.(map[string]any)
+	for key, value := range r2["files"].(map[string]any) {
+		t.Logf("%v: %v", key, value)
+	}
+}
+```
+
+```
+> go test -v -run ^TestPostMultipartForm$
+=== RUN   TestPostMultipartForm
+    method_test.go:128: upload\files_e\d1.txt: hello D1!
+    method_test.go:128: upload\files_e\d2.txt: hello D2!
+    method_test.go:128: file_a\a.txt: hello A!
+    method_test.go:128: file_c\b.txt: hello B!
+    method_test.go:128: files_c\c1.txt: hello C1!
+    method_test.go:128: files_c\c2.txt: hello C2!
+--- PASS: TestPostMultipartForm (1.06s)
+PASS
+ok      github.com/Drelf2018/req/tests  1.299s
+```
+
 ### 接口 `APICreator` 到底是个啥
 
-直接从 [method.go](./method.go) 找出我写好了的一个文件上传请求的构造器，其中 `FileWriter` 定义在 [writer.go](./writer.go) 中。
+直接从 [method.go](./method.go) 找出我写好了的一个文件上传请求的构造器。
 
 ```go
 // 带有文件的请求体的 POST 请求构造器
@@ -556,4 +628,40 @@ func (p PostMultipartForm) NewRequestWithContext(ctx context.Context, cli *Clien
 }
 
 var _ APICreator = PostMultipartForm{}
+```
+
+### 为 `JSON` 格式响应体导出对应的结构体
+
+在 [client.go](./client.go) 中有 `(*Client).Generate` 方法，它会请求这个 `API` 并将返回结果以 `JSON` 格式解析，如果成功会再将该 `JSON` 转成 `go` 语言的结构体形式，最后追加写入给定文件中。该功能为实验性功能，不多作介绍，如想了解详情请看 [converter.go](./converter.go) 源码。
+
+```go
+func TestGenerate(t *testing.T) {
+	req.Generate("req_test.go", User{UID: "114514"})
+}
+
+// AutoGenerate ↓↓↓
+
+type UserResponse struct {
+	Args struct {
+	} `json:"args"`
+	Data  string `json:"data"` // ""
+	Files struct {
+	} `json:"files"`
+	Form struct {
+	} `json:"form"`
+	Headers struct {
+		AcceptEncoding string `json:"Accept-Encoding"` // "gzip"
+		Host           string `json:"Host"`            // "httpbin.org"
+		UserAgent      string `json:"User-Agent"`      // "Mozilla/5.1 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.1.1.1 Safari/537.36 Edg/116.1.1938.54"
+	} `json:"headers"`
+	JSON   any    `json:"json"`
+	Method string `json:"method"` // "GET"
+	Origin string `json:"origin"` // "xxx.xxx.xxx.xxx"
+	URL    string `json:"url"`    // "https://httpbin.org/anything/user/114514"
+}
+
+func GetUser() (result UserResponse, err error) {
+	err = cli.Result(User{}, &result)
+	return
+}
 ```
