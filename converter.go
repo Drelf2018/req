@@ -508,7 +508,7 @@ func (c *Converter) WriteArray(val []any) (err error) {
 		}
 	}
 
-	// 非对象数组 []int / []string / ...
+	// 非对象数组 []int / []string / [][]int / ...
 	var rtype string
 	for idx := 0; idx < len(val); idx++ {
 		ntype, _ := ParseType(val[idx])
@@ -520,6 +520,11 @@ func (c *Converter) WriteArray(val []any) (err error) {
 				break
 			}
 		}
+	}
+
+	if rtype == "slice" {
+		c.WriteArray(val[0].([]any))
+		return
 	}
 
 	if rtype == "" {

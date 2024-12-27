@@ -263,8 +263,9 @@ func TestM4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = format.Source(b)
+	b, err = format.Source(b)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(string(b))
 }
