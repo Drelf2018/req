@@ -323,11 +323,15 @@ type Client struct {
 
 其中 `http.Client` 即每次发起请求时使用的客户端。
 
+代码中的 `RetryTimer` 是定义在 [interfaces.go](./interfaces.go) 中用来重试请求的接口。
+
+具体实现参考 [retry.go](./retry.go) 中的 `DoubleTimer` 。直接将该类型嵌入 `API` 结构体即可使用。
+
 ```go
 // 这便是上面提到的自动添加 CookieJar 的实现
-func do(c http.Client, req *http.Request, jar CookieJar) (*http.Response, error) {
+func addCookie(c http.Client, jar CookieJar) *http.Client {
 	c.Jar = jar
-	return c.Do(req)
+	return &c
 }
 
 // 发送带上下文的请求
@@ -337,9 +341,32 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 		return nil, err
 	}
 	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
-		return do(c.Client, req, jar)
+		cli := addCookie(c.Client, jar)
+		resp, err := cli.Do(req)
+		if timer, ok := api.(RetryTimer); ok {
+			for i := 0; err != nil; i++ {
+				d, ok := timer.NextRetry(i)
+				if !ok {
+					break
+				}
+				time.Sleep(d)
+				resp, err = cli.Do(req)
+			}
+		}
+		return resp, err
 	}
-	return c.Client.Do(req)
+	resp, err := c.Client.Do(req)
+	if timer, ok := api.(RetryTimer); ok {
+		for i := 0; err != nil; i++ {
+			d, ok := timer.NextRetry(i)
+			if !ok {
+				break
+			}
+			time.Sleep(d)
+			resp, err = c.Client.Do(req)
+		}
+	}
+	return resp, err
 }
 ```
 
@@ -562,7 +589,7 @@ func (p PostMultipartForm) NewRequestWithContext(ctx context.Context, cli *Clien
 	value := reflect.Indirect(reflect.ValueOf(api))
 	// 判断当前有没有加载任意一种文件写入器
 	if p.FileWriter == nil {
-		// 使用默认的文件写入器 包装后的 *multipart.Writer
+		// 使用默认的文件写入器 封装后的 *multipart.Writer
 		p.FileWriter = &DefaultFileWriter{}
 	}
 	// 初始化写入器

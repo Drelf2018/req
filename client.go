@@ -11,6 +11,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // 客户端
@@ -203,9 +204,9 @@ func (c *Client) MakeJSONMap(body []Field, value reflect.Value) (m map[string]an
 	return
 }
 
-func do(c http.Client, req *http.Request, jar CookieJar) (*http.Response, error) {
+func addCookie(c http.Client, jar CookieJar) *http.Client {
 	c.Jar = jar
-	return c.Do(req)
+	return &c
 }
 
 // 发送带上下文的请求
@@ -215,9 +216,32 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 		return nil, err
 	}
 	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
-		return do(c.Client, req, jar)
+		cli := addCookie(c.Client, jar)
+		resp, err := cli.Do(req)
+		if timer, ok := api.(RetryTimer); ok {
+			for i := 0; err != nil; i++ {
+				d, ok := timer.NextRetry(i)
+				if !ok {
+					break
+				}
+				time.Sleep(d)
+				resp, err = cli.Do(req)
+			}
+		}
+		return resp, err
 	}
-	return c.Client.Do(req)
+	resp, err := c.Client.Do(req)
+	if timer, ok := api.(RetryTimer); ok {
+		for i := 0; err != nil; i++ {
+			d, ok := timer.NextRetry(i)
+			if !ok {
+				break
+			}
+			time.Sleep(d)
+			resp, err = c.Client.Do(req)
+		}
+	}
+	return resp, err
 }
 
 // 发送请求

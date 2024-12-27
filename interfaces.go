@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 )
 
 // API 信息
@@ -50,4 +51,15 @@ type Unwrap interface {
 type CookieJar interface {
 	IsValid() bool
 	http.CookieJar
+}
+
+// 重试计时器
+type RetryTimer interface {
+	// 下次重试前需要等待的时间
+	//
+	// 参数 num 代表已重试次数 从 0 开始
+	//
+	// 返回值 time.Duration 代表需要等待的时间
+	// 返回值 bool 代表是否继续重试
+	NextRetry(num int) (time.Duration, bool)
 }

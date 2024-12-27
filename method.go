@@ -124,7 +124,7 @@ func (p PostMultipartForm) NewRequestWithContext(ctx context.Context, cli *Clien
 	value := reflect.Indirect(reflect.ValueOf(api))
 	// 判断当前有没有加载任意一种文件写入器
 	if p.FileWriter == nil {
-		// 使用默认的文件写入器 包装后的 *multipart.Writer
+		// 使用默认的文件写入器 封装后的 *multipart.Writer
 		p.FileWriter = &DefaultFileWriter{}
 	}
 	// 初始化写入器
