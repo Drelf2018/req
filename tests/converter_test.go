@@ -269,3 +269,16 @@ func TestM4(t *testing.T) {
 	}
 	t.Log(string(b))
 }
+
+func TestM5(t *testing.T) {
+	b := []byte(`{"code":0,"message":"0","ttl":1,"data":{"-10":"特别关注"}}`)
+	b, err := req.NewConverter(true, true).JSONToStruct(b, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = format.Source(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(string(b))
+}

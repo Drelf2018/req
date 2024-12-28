@@ -124,6 +124,8 @@ func NormalizeName(name string) string {
 	}
 	if patternAllNumber.MatchString(name) {
 		name = "Num" + name
+	} else if name[0] == '-' && patternAllNumber.MatchString(name[1:]) {
+		name = "Neg" + name[1:]
 	} else if prefix, ok := numbers[name[0]]; ok {
 		name = prefix + name[1:]
 	}
