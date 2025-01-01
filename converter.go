@@ -140,6 +140,7 @@ func NormalizeName(name string) string {
 // 解析 array 中类型名
 //
 // 因为 json 的 array 里面允许不同类型的值，所以需要一个函数来判断到底用哪个
+//
 // 如果都是数字就取范围最大的那个，如果有非数字类型则用 any
 func ParseNumberType(type1, type2 string) string {
 	switch {
@@ -217,7 +218,8 @@ func ParseType(t any) (rtype string, comment string) {
 //
 // 这个结构体是为了实现有序的字典(map[string]any)创建的
 //
-// 众所周知 golang 的字典是无序的，因此为了保证导出的字段顺序与输入一致
+// 众所周知 golang 的字典是无序的，因此为了保证导出的字段顺序与输入时一致
+//
 // 用了这个结构体的列表([]*object)来描述字典
 type object struct {
 	// 键名
