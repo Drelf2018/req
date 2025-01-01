@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"reflect"
 	"strings"
 	"time"
@@ -76,12 +77,36 @@ func (c *Client) UserAgent() string {
 	return c.Header.Get("User-Agent")
 }
 
+// JoinPath returns a new [URL] with the provided path elements joined to
+// any existing path and the resulting path cleaned of any ./ or ../ elements.
+// Any sequences of multiple / characters will be reduced to a single /.
+func JoinPath(u *url.URL, elem ...string) *url.URL {
+	elem = append([]string{u.EscapedPath()}, elem...)
+	var p string
+	if !strings.HasPrefix(elem[0], "/") {
+		// Return a relative path if u is relative,
+		// but ensure that it contains no ../ elements.
+		elem[0] = "/" + elem[0]
+		p = path.Join(elem...)[1:]
+	} else {
+		p = path.Join(elem...)
+	}
+	// path.Join will remove any trailing slashes.
+	// Preserve at least one.
+	if strings.HasSuffix(elem[len(elem)-1], "/") && !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	url := *u
+	url.Path = p
+	return &url
+}
+
 // 拼接 BaseURL 和提供的 rawURL
 //
 // 当 rawURL 以 "/" 开头时才会拼接
 func (c *Client) URL(rawURL string) string {
 	if c.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
-		rawURL = c.BaseURL.JoinPath(rawURL).String()
+		rawURL = JoinPath(c.BaseURL, rawURL).String()
 	}
 	return rawURL
 }

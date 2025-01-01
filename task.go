@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-var ioReader = reflect.TypeFor[io.Reader]()
+var ioReader = reflect.TypeOf((*io.Reader)(nil)).Elem()
 
 type Any struct {
 	Type  unsafe.Pointer
@@ -75,7 +75,7 @@ func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 		}
 
 		var v Field // tag:"api:value,omitempty"
-		api, v.Omitempty = strings.CutSuffix(api, ",omitempty")
+		api, _, v.Omitempty = strings.Cut(api, ",omitempty")
 		api, v.Value, _ = strings.Cut(api, ":")
 
 		if api == "file" && !field.Type.Implements(ioReader) {
