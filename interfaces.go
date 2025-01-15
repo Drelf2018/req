@@ -42,6 +42,11 @@ type NamedReader interface {
 
 var _ NamedReader = (*os.File)(nil)
 
+// 检验响应
+type CheckResponse interface {
+	CheckResponse(*http.Response) error
+}
+
 // 可解包出错误的接口返回值
 type Unwrap interface {
 	Unwrap() error
@@ -54,12 +59,13 @@ type CookieJar interface {
 }
 
 // 重试计时器
-type RetryTimer interface {
+type RetryTicker interface {
 	// 下次重试前需要等待的时间
 	//
 	// 参数 num 代表已重试次数 从 0 开始
 	//
 	// 返回值 time.Duration 代表需要等待的时间
+	//
 	// 返回值 bool 代表是否继续重试
 	NextRetry(num int) (time.Duration, bool)
 }
