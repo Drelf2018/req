@@ -41,6 +41,7 @@ type Task struct {
 	Body   []Field
 	Files  []Field
 	Query  []Field
+	Cookie []Field
 	Header []Field
 }
 
@@ -110,6 +111,8 @@ func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 			task.Files = append(task.Files, v)
 		case "query":
 			task.Query = append(task.Query, v)
+		case "cookie":
+			task.Cookie = append(task.Cookie, v)
 		case "header":
 			task.Header = append(task.Header, v)
 		}
@@ -129,7 +132,7 @@ func NewTask(api APIData) *Task {
 	return &task
 }
 
-var taskCache sync.Map //map[uintptr]*Task
+var taskCache sync.Map // map[uintptr]*Task
 
 // 根据 API 加载任务
 //

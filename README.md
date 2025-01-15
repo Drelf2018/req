@@ -328,24 +328,20 @@ type Client struct {
 具体实现参考 [retry.go](./retry.go) 中的 `DoubleTimer` 。直接将该类型嵌入 `API` 结构体即可使用。
 
 ```go
-// 这便是上面提到的自动添加 CookieJar 的实现
-func addCookie(c http.Client, jar CookieJar) *http.Client {
-	c.Jar = jar
-	return &c
-}
-
 // 发送带上下文的请求
 func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
 	req, err := api.NewRequestWithContext(ctx, c, api)
 	if err != nil {
 		return nil, err
 	}
+	// 这便是上面提到的自动添加 CookieJar 的实现
 	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
-		cli := addCookie(c.Client, jar)
+		cli := c.Client
+		cli.Jar = jar
 		resp, err := cli.Do(req)
-		if timer, ok := api.(RetryTimer); ok {
+		if ticker, ok := api.(RetryTicker); ok {
 			for i := 0; err != nil; i++ {
-				d, ok := timer.NextRetry(i)
+				d, ok := ticker.NextRetry(i)
 				if !ok {
 					break
 				}
@@ -356,9 +352,9 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 		return resp, err
 	}
 	resp, err := c.Client.Do(req)
-	if timer, ok := api.(RetryTimer); ok {
+	if ticker, ok := api.(RetryTicker); ok {
 		for i := 0; err != nil; i++ {
-			d, ok := timer.NextRetry(i)
+			d, ok := ticker.NextRetry(i)
 			if !ok {
 				break
 			}

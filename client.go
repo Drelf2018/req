@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path"
@@ -229,41 +230,53 @@ func (c *Client) MakeJSONMap(body []Field, value reflect.Value) (m map[string]an
 	return
 }
 
-func addCookie(c http.Client, jar CookieJar) *http.Client {
-	c.Jar = jar
-	return &c
+type CookieAdder struct {
+	URL *url.URL
+	http.CookieJar
+}
+
+func (c *CookieAdder) Add(key, val string) {
+	c.CookieJar.SetCookies(c.URL, []*http.Cookie{{Name: key, Value: val}})
 }
 
 // 发送带上下文的请求
 func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
+	// 新建请求
 	req, err := api.NewRequestWithContext(ctx, c, api)
 	if err != nil {
 		return nil, err
 	}
-	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
-		cli := addCookie(c.Client, jar)
-		resp, err := cli.Do(req)
-		if timer, ok := api.(RetryTimer); ok {
-			for i := 0; err != nil; i++ {
-				d, ok := timer.NextRetry(i)
-				if !ok {
-					break
-				}
-				time.Sleep(d)
-				resp, err = cli.Do(req)
+	// 初始化 CookieJar
+	cli := c.Client
+	cookieJar, ok := api.(CookieJar)
+	if ok && cookieJar.IsValid() {
+		cli.Jar = cookieJar
+	}
+	// 添加字段中 cookie
+	cookies := LoadTask(api).Cookie
+	if len(cookies) != 0 {
+		if cli.Jar == nil {
+			cli.Jar, _ = cookiejar.New(nil)
+		}
+		adder := &CookieAdder{req.URL, cli.Jar}
+		val := reflect.Indirect(reflect.ValueOf(api))
+		for _, data := range cookies {
+			err = c.AddValue(adder, data, val)
+			if err != nil {
+				return nil, err
 			}
 		}
-		return resp, err
 	}
-	resp, err := c.Client.Do(req)
-	if timer, ok := api.(RetryTimer); ok {
+	// 发送请求
+	resp, err := cli.Do(req)
+	if ticker, ok := api.(RetryTicker); ok {
 		for i := 0; err != nil; i++ {
-			d, ok := timer.NextRetry(i)
+			d, ok := ticker.NextRetry(i)
 			if !ok {
 				break
 			}
 			time.Sleep(d)
-			resp, err = c.Client.Do(req)
+			resp, err = cli.Do(req)
 		}
 	}
 	return resp, err
@@ -339,6 +352,13 @@ func (c *Client) ResultWithContext(ctx context.Context, api API, result any) (er
 		return
 	}
 	defer resp.Body.Close()
+
+	if i, ok := result.(CheckResponse); ok {
+		err = i.CheckResponse(resp)
+		if err != nil {
+			return
+		}
+	}
 
 	err = json.NewDecoder(resp.Body).Decode(result)
 	if err != nil {
