@@ -1,23 +1,24 @@
-package req
+package req_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Drelf2018/req"
 )
 
-type Status struct {
+type Cookie struct {
 	req.Get
 
 	MyCookie   string `api:"cookie"`
 	YourCookie string `api:"cookie"`
 }
 
-func (Status) RawURL() string {
+func (Cookie) RawURL() string {
 	return "https://httpbin.org/get"
 }
 
-type StatusResponse struct {
+type CookieResponse struct {
 	Args struct {
 	} `json:"args"`
 	Headers struct {
@@ -31,16 +32,16 @@ type StatusResponse struct {
 	URL    string `json:"url"`
 }
 
-func GetStatus() (StatusResponse, error) {
-	return req.Result[StatusResponse](Status{MyCookie: "abc123", YourCookie: "xyz789"})
+func GetCookie() (CookieResponse, error) {
+	return req.Result[CookieResponse](Cookie{MyCookie: "abc123", YourCookie: "xyz789"})
 }
 
 func TestRetry(t *testing.T) {
-	r, err := GetStatus()
+	r, err := GetCookie()
 	if err != nil {
 		c, cancel := req.WithRetry(req.DefaultRetryTicker)
 		for range c {
-			r, err = GetStatus()
+			r, err = GetCookie()
 			if err == nil {
 				cancel()
 			}
@@ -50,4 +51,17 @@ func TestRetry(t *testing.T) {
 		t.Fatal(err, r)
 	}
 	t.Log(r)
+}
+
+func TestFibonacci(t *testing.T) {
+	now := time.Now()
+	c, cancel := req.WithRetry(req.FibonacciTicker{time.Second, 2 * time.Second})
+	for i := range c {
+		n := time.Now()
+		t.Log(i, n.Sub(now))
+		now = n
+		if i == 4 {
+			cancel()
+		}
+	}
 }

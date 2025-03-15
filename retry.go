@@ -50,6 +50,22 @@ func ZeroTicker(maxRetries int, whySafe string) RetryTicker {
 	return zeroTicker(maxRetries)
 }
 
+// 斐波那契重试器
+type FibonacciTicker []time.Duration
+
+func (t FibonacciTicker) NextRetry(num int) (time.Duration, bool) {
+	if len(t) < 2 {
+		return 0, false
+	}
+	switch num {
+	case 0, 1:
+		return t[num], true
+	default:
+		t[0], t[1] = t[1], t[0]+t[1]
+		return t[1], true
+	}
+}
+
 // 重试传输器
 type RetryTransport struct {
 	http.RoundTripper
