@@ -248,8 +248,7 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 	}
 	// 初始化 CookieJar
 	cli := c.Client
-	cookieJar, ok := api.(CookieJar)
-	if ok && cookieJar.IsValid() {
+	if cookieJar, ok := api.(CookieJar); ok && cookieJar.IsValid() {
 		cli.Jar = cookieJar
 	}
 	// 添加字段中 cookie
@@ -269,14 +268,22 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 	}
 	// 发送请求
 	resp, err := cli.Do(req)
-	if ticker, ok := api.(RetryTicker); ok {
-		for i := 0; err != nil; i++ {
-			d, ok := ticker.NextRetry(i)
-			if !ok {
-				break
+	if err != nil {
+		if ticker, ok := api.(RetryTicker); ok {
+			for i := 0; err != nil; i++ {
+				d, ok := ticker.NextRetry(i)
+				if !ok {
+					break
+				}
+				time.Sleep(d)
+				resp, err = cli.Do(req)
 			}
-			time.Sleep(d)
-			resp, err = cli.Do(req)
+		}
+	}
+	// 检验响应
+	if err == nil {
+		if checker, ok := api.(CheckResponse); ok {
+			err = checker.CheckResponse(resp)
 		}
 	}
 	return resp, err
@@ -354,13 +361,6 @@ func (c *Client) ResultWithContext(ctx context.Context, api API, result any) (er
 		return
 	}
 	defer resp.Body.Close()
-
-	if i, ok := result.(CheckResponse); ok {
-		err = i.CheckResponse(resp)
-		if err != nil {
-			return
-		}
-	}
 
 	err = json.NewDecoder(resp.Body).Decode(result)
 	if err != nil {
