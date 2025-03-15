@@ -288,23 +288,25 @@ func (c *Client) Do(api API) (*http.Response, error) {
 }
 
 // 获取带上下文的请求结果
-func (c *Client) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
+func (c *Client) ContentWithContext(ctx context.Context, api API) (p []byte, err error) {
 	resp, err := c.DoWithContext(ctx, api)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	p, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return
 }
 
 // 获取请求结果
-func (c *Client) Content(api API) ([]byte, error) {
+func (c *Client) Content(api API) (p []byte, err error) {
 	resp, err := c.Do(api)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	p, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return
 }
 
 // 获取带上下文的请求结果字符串
