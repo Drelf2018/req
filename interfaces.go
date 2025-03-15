@@ -34,7 +34,7 @@ type Adder interface {
 var _ Adder = (*url.Values)(nil)
 var _ Adder = (*http.Header)(nil)
 
-// 命名的读取器
+// 带命名的读取器
 type NamedReader interface {
 	io.Reader
 	Name() (filename string)
@@ -54,8 +54,10 @@ type Unwrap interface {
 
 // 可判断有效性的 CookieJar
 type CookieJar interface {
-	IsValid() bool
 	http.CookieJar
+
+	// 可以检测当前 cookies 是否失效并自动刷新
+	IsValid() bool
 }
 
 // 重试计时器
