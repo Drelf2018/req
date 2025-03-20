@@ -284,6 +284,8 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 	if err == nil {
 		if checker, ok := api.(CheckResponse); ok {
 			err = checker.CheckResponse(resp)
+		} else if resp.StatusCode != 200 {
+			err = fmt.Errorf("http: response status: %s", resp.Status)
 		}
 	}
 	return resp, err

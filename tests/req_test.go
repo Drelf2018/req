@@ -2,9 +2,7 @@ package req_test
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
-	"net/http"
 	"testing"
 
 	"github.com/Drelf2018/req"
@@ -69,13 +67,6 @@ func TestSign(t *testing.T) {
 
 type Status struct {
 	req.Get
-}
-
-func (Status) CheckResponse(resp *http.Response) error {
-	if resp.StatusCode != 200 {
-		return errors.New(resp.Status)
-	}
-	return nil
 }
 
 func (Status) RawURL() string {
