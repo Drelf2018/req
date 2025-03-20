@@ -51,18 +51,17 @@ func ZeroTicker(maxRetries int, whySafe string) RetryTicker {
 }
 
 // 斐波那契重试器
-type FibonacciTicker []time.Duration
+//
+// 前两项为第一次、第二次重试间隔时间，之后按照斐波那契规则返回新间隔时间，第三项为最大单次重试间隔时间
+type FibonacciTicker [3]time.Duration
 
-func (t FibonacciTicker) NextRetry(num int) (time.Duration, bool) {
-	if len(t) < 2 {
-		return 0, false
-	}
+func (t *FibonacciTicker) NextRetry(num int) (time.Duration, bool) {
 	switch num {
 	case 0, 1:
-		return t[num], true
+		return t[num], t[num] <= t[2]
 	default:
 		t[0], t[1] = t[1], t[0]+t[1]
-		return t[1], true
+		return t[1], t[1] <= t[2]
 	}
 }
 

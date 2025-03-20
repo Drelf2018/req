@@ -55,13 +55,10 @@ func TestRetry(t *testing.T) {
 
 func TestFibonacci(t *testing.T) {
 	now := time.Now()
-	c, cancel := req.WithRetry(req.FibonacciTicker{time.Second, 2 * time.Second})
-	for i := range c {
+	c, _ := req.WithRetry(&req.FibonacciTicker{time.Second, 2 * time.Second, 7 * time.Second})
+	for range c {
 		n := time.Now()
-		t.Log(i, n.Sub(now))
+		t.Log(n.Sub(now))
 		now = n
-		if i == 4 {
-			cancel()
-		}
 	}
 }
