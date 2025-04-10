@@ -1,9 +1,3 @@
-<p align="center">
-  <a href="https://github.com/Drelf2018/webhook/">
-    <img src="./avatar.png" height="200" alt="req">
-  </a>
-</p>
-
 <div align="center">
 
 # req
