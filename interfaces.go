@@ -1,29 +1,32 @@
 package req
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
+	"reflect"
 	"time"
 )
 
-// API 信息
-type APIData interface {
+// API 接口
+type API interface {
 	RawURL() string
 	Method() string
 }
 
-// API 构造器
-type APICreator interface {
-	NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (*http.Request, error)
+// API 请求体
+type APIBody interface {
+	Body(cli *Client, body []Field, value reflect.Value, api API) (io.Reader, error)
 }
 
-// API 接口
-type API interface {
-	APIData
-	APICreator
+// API 请求参数
+type APIQuery interface {
+	Query(req *http.Request, cli *Client, query []Field, value reflect.Value, api API) error
+}
+
+// API 请求头
+type APIHeader interface {
+	Header(req *http.Request, cli *Client, header []Field, value reflect.Value, api API) error
 }
 
 // 可添加接口
@@ -33,31 +36,11 @@ type Adder interface {
 
 var _ Adder = (*url.Values)(nil)
 var _ Adder = (*http.Header)(nil)
-
-// 带命名的读取器
-type NamedReader interface {
-	io.Reader
-	Name() (filename string)
-}
-
-var _ NamedReader = (*os.File)(nil)
+var _ Adder = (*CookieAdder)(nil)
 
 // 检验响应
 type CheckResponse interface {
 	CheckResponse(*http.Response) error
-}
-
-// 可解包出错误的接口返回值
-type Unwrap interface {
-	Unwrap() error
-}
-
-// 可判断有效性的 CookieJar
-type CookieJar interface {
-	http.CookieJar
-
-	// 可以检测当前 cookies 是否失效并自动刷新
-	IsValid() bool
 }
 
 // 重试计时器
@@ -70,4 +53,9 @@ type RetryTicker interface {
 	//
 	// 返回值 bool 代表是否继续重试
 	NextRetry(num int) (time.Duration, bool)
+}
+
+// 可解包出错误的接口返回值
+type Unwrap interface {
+	Unwrap() error
 }

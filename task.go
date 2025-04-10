@@ -1,14 +1,11 @@
 package req
 
 import (
-	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"unsafe"
 )
-
-var ioReader = reflect.TypeOf((*io.Reader)(nil)).Elem()
 
 type Any struct {
 	Type  unsafe.Pointer
@@ -28,10 +25,17 @@ func ValuePtr(in any) uintptr {
 
 // 字段
 type Field struct {
-	Index     []int  // the index of the field in API object 表示这个字段在结构体中的索引，因为结构体可以嵌套所以有多层
-	Name      string // supplied by the "req" tag or parsed from the field name 表示这个字段要使用的名称，例如 json 中 key 的部分
-	Value     string // the default value used when the field value is zero 表示这个字段的默认值
-	Omitempty bool   // ignored if the field is zero, conflicts with the default value 表示这个字段为空时要不要忽略这项
+	// 字段在结构体中的索引，因为结构体可以嵌套所以有多层
+	Index []int
+
+	// 字段要使用的名称，例如 json 中 key 的部分
+	Name string
+
+	// 字段的默认值
+	Value string
+
+	// 字段为空时是否忽略这项
+	Omitempty bool
 }
 
 // 任务
@@ -39,10 +43,9 @@ type Field struct {
 // 包含了 API 结构体中所有有效字段信息
 type Task struct {
 	Body   []Field
-	Files  []Field
 	Query  []Field
-	Cookie []Field
 	Header []Field
+	Cookie []Field
 }
 
 func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
@@ -79,17 +82,6 @@ func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 		api, _, v.Omitempty = strings.Cut(api, ",omitempty")
 		api, v.Value, _ = strings.Cut(api, ":")
 
-		if api == "file" && !field.Type.Implements(ioReader) {
-			continue
-		} else if api == "files" {
-			if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
-				continue
-			}
-			if !field.Type.Elem().Implements(ioReader) {
-				continue
-			}
-		}
-
 		v.Index = append(index, field.Index[0])
 
 		if req, ok := field.Tag.Lookup("req"); ok {
@@ -107,20 +99,18 @@ func (task *Task) parse(typ reflect.Type, index []int, parentTag string) {
 		switch api {
 		case "body":
 			task.Body = append(task.Body, v)
-		case "file", "files":
-			task.Files = append(task.Files, v)
 		case "query":
 			task.Query = append(task.Query, v)
-		case "cookie":
-			task.Cookie = append(task.Cookie, v)
 		case "header":
 			task.Header = append(task.Header, v)
+		case "cookie":
+			task.Cookie = append(task.Cookie, v)
 		}
 	}
 }
 
 // 新建任务
-func NewTask(api APIData) *Task {
+func NewTask(api API) *Task {
 	var task Task
 	apiType := reflect.TypeOf(api)
 	if apiType.Kind() == reflect.Pointer {
@@ -137,7 +127,7 @@ var taskCache sync.Map // map[uintptr]*Task
 // 根据 API 加载任务
 //
 // 不存在则新建
-func LoadTask(api APIData) *Task {
+func LoadTask(api API) *Task {
 	ptr := TypePtr(api)
 	if v, ok := taskCache.Load(ptr); ok {
 		return v.(*Task)
@@ -148,7 +138,7 @@ func LoadTask(api APIData) *Task {
 }
 
 // 预加载任务
-func PreloadTask(api ...APIData) {
+func PreloadTask(api ...API) {
 	for _, i := range api {
 		taskCache.Store(TypePtr(i), NewTask(i))
 	}

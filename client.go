@@ -1,7 +1,6 @@
 package req
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -185,11 +184,6 @@ func (c *Client) AddHeader(req *http.Request, header []Field, val reflect.Value)
 	return
 }
 
-// 获取 *http.Request 对象
-func (c *Client) AddBody(ctx context.Context, api APIData, body io.Reader) (*http.Request, error) {
-	return http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), body)
-}
-
 // 根据提供的 []Field 制作 url.Values
 func (c *Client) MakeURLValues(fields []Field, val reflect.Value) (v url.Values, err error) {
 	v = make(url.Values)
@@ -240,34 +234,72 @@ func (c *CookieAdder) Add(key, val string) {
 }
 
 // 发送带上下文的请求
-func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
-	// 新建请求
-	req, err := api.NewRequestWithContext(ctx, c, api)
+func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
+	// 提取 API 中字段
+	task := LoadTask(api)
+	// 获取 API 的值(reflect.Value)以便后续添加参数
+	value := reflect.Indirect(reflect.ValueOf(api))
+	// 获取请求体
+	var r io.Reader
+	if body, ok := api.(APIBody); ok {
+		r, err = body.Body(c, task.Body, value, api)
+	}
 	if err != nil {
-		return nil, err
+		return
+	}
+	// 新建请求
+	req, err := http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), r)
+	if err != nil {
+		return
+	}
+	// 获取请求参数
+	if query, ok := api.(APIQuery); ok {
+		err = query.Query(req, c, task.Query, value, api)
+	} else {
+		err = c.AddQuery(req, task.Query, value)
+	}
+	if err != nil {
+		return
+	}
+	// 获取请求头
+	if header, ok := api.(APIHeader); ok {
+		err = header.Header(req, c, task.Header, value, api)
+	} else {
+		err = c.AddHeader(req, task.Header, value)
+	}
+	if err != nil {
+		return
 	}
 	// 初始化 CookieJar
 	cli := c.Client
-	if cookieJar, ok := api.(CookieJar); ok && cookieJar.IsValid() {
+	if cookieJar, ok := api.(http.CookieJar); ok {
 		cli.Jar = cookieJar
 	}
 	// 添加字段中 cookie
-	cookies := LoadTask(api).Cookie
-	if len(cookies) != 0 {
+	if len(task.Cookie) != 0 {
 		if cli.Jar == nil {
 			cli.Jar, _ = cookiejar.New(nil)
 		}
 		adder := &CookieAdder{req.URL, cli.Jar}
-		val := reflect.Indirect(reflect.ValueOf(api))
-		for _, data := range cookies {
-			err = c.AddValue(adder, data, val)
+		for _, data := range task.Cookie {
+			err = c.AddValue(adder, data, value)
 			if err != nil {
-				return nil, err
+				return
 			}
 		}
 	}
 	// 发送请求
-	resp, err := cli.Do(req)
+	checker, isChecker := api.(CheckResponse)
+	resp, err = cli.Do(req)
+	// 检验响应
+	if err == nil {
+		if isChecker {
+			err = checker.CheckResponse(resp)
+		} else if resp.StatusCode != 200 {
+			err = fmt.Errorf("http: response status: %s", resp.Status)
+		}
+	}
+	// 重试
 	if err != nil {
 		if ticker, ok := api.(RetryTicker); ok {
 			for i := 0; err != nil; i++ {
@@ -277,18 +309,17 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, er
 				}
 				time.Sleep(d)
 				resp, err = cli.Do(req)
+				if err == nil {
+					if isChecker {
+						err = checker.CheckResponse(resp)
+					} else if resp.StatusCode != 200 {
+						err = fmt.Errorf("http: response status: %s", resp.Status)
+					}
+				}
 			}
 		}
 	}
-	// 检验响应
-	if err == nil {
-		if checker, ok := api.(CheckResponse); ok {
-			err = checker.CheckResponse(resp)
-		} else if resp.StatusCode != 200 {
-			err = fmt.Errorf("http: response status: %s", resp.Status)
-		}
-	}
-	return resp, err
+	return
 }
 
 // 发送请求
@@ -392,95 +423,4 @@ func (c *Client) JSONWithContext(ctx context.Context, api API) (data any, err er
 func (c *Client) JSON(api API) (data any, err error) {
 	err = c.Result(api, &data)
 	return
-}
-
-// 生成 cURL
-func (c *Client) CURL(api API) (string, error) {
-	req, err := api.NewRequestWithContext(context.Background(), c, api)
-	if err != nil {
-		return "", err
-	}
-	w := bytes.NewBufferString("curl")
-	if req.Body != nil {
-		defer req.Body.Close()
-		w.WriteString(" -d '")
-		_, err = w.ReadFrom(req.Body)
-		if err != nil {
-			return "", err
-		}
-		w.WriteByte('\'')
-	}
-	for key, values := range req.Header {
-		for _, value := range values {
-			w.WriteString(" -H '")
-			w.WriteString(key)
-			w.WriteString(": ")
-			w.WriteString(value)
-			w.WriteByte('\'')
-		}
-	}
-	if req.Method != http.MethodGet {
-		w.WriteString(" -X ")
-		w.WriteString(req.Method)
-	}
-	w.WriteByte(' ')
-	w.WriteString(req.URL.String())
-	return w.String(), nil
-}
-
-// 将请求结果改写成结构体
-func (c *Client) Struct(api API, name string) ([]byte, error) {
-	b, err := c.Content(api)
-	if err != nil {
-		return nil, err
-	}
-	return NewConverter(true, true).JSONToStruct(b, name)
-}
-
-// 在指定文件写入请求结果改写的结构体
-func (c *Client) Generate(filename string, api API) error {
-	name := reflect.TypeOf(api).Name()
-	b, err := c.Struct(api, name+"Response")
-	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	f.Write([]byte{'\n'})
-	_, err = f.Write(b)
-	if err != nil {
-		return err
-	}
-	f.Write([]byte{'\n', '\n'})
-	m := api.Method()
-	f.WriteString(fmt.Sprintf(`func %s%s() (result %sResponse, err error) {
-	err = cli.Result(%s{}, &result)
-	return
-}`, strings.ToUpper(m[:1])+strings.ToLower(m[1:]), name, name, name))
-	return f.Close()
-}
-
-// 克隆客户端
-func (c *Client) Clone(rawURL string) (*Client, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	return &Client{
-		Client:    c.Client,
-		BaseURL:   u,
-		Header:    c.Header.Clone(),
-		Variables: c.Variables,
-	}, nil
-}
-
-// 必须克隆！
-func (c *Client) MustClone(rawURL string) *Client {
-	cli, err := c.Clone(rawURL)
-	if err != nil {
-		panic(err)
-	}
-	return cli
 }
