@@ -75,28 +75,3 @@ func JSONWithContext(ctx context.Context, api API) (any, error) {
 func JSON(api API) (any, error) {
 	return DefaultClient.JSON(api)
 }
-
-// 生成 cURL
-func CURL(api API) (string, error) {
-	return DefaultClient.CURL(api)
-}
-
-// 将请求结果改写成结构体
-func Struct(api API, name string) ([]byte, error) {
-	return DefaultClient.Struct(api, name)
-}
-
-// 在指定文件写入请求结果改写的结构体
-func Generate(filename string, api API) error {
-	return DefaultClient.Generate(filename, api)
-}
-
-// 克隆客户端
-func Clone(rawURL string) (*Client, error) {
-	return DefaultClient.Clone(rawURL)
-}
-
-// 必须克隆！
-func MustClone(rawURL string) *Client {
-	return DefaultClient.MustClone(rawURL)
-}
