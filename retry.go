@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"time"
-
-	_ "unsafe"
 )
 
 // 初始重试时间间隔 1 秒 之后每次重试时间间隔翻倍
