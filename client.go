@@ -18,31 +18,35 @@ import (
 // 客户端
 type Client struct {
 	http.Client
-	BaseURL   *url.URL
-	Header    http.Header
-	Variables map[string]any // Client will use the value in Variables when the Field's Value starts with "$"
+
+	// 基础路径
+	// 若 API 路径以 "/" 开头则会拼接在此路径后
+	BaseURL *url.URL
+
+	// 默认请求头
+	Header http.Header
+
+	// 自定义变量
+	// 当字段 tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
+	Variables map[string]any
+}
+
+// 设置 Variables 中的值
+func (c *Client) Set(key string, value any) {
+	if c.Variables == nil {
+		c.Variables = make(map[string]any)
+	}
+	c.Variables[key] = value
 }
 
 // 获取 Variables 中的值
 //
 // 参数 key 必须以 "$" 开头
 func (c *Client) Value(key string) any {
-	if c.Variables == nil {
+	if c.Variables == nil || !strings.HasPrefix(key, "$") {
 		return nil
 	}
-	if strings.HasPrefix(key, "$") {
-		return c.Variables[key]
-	}
-	return nil
-}
-
-// 获取 Variables 中的值并转换成字符串
-func (c *Client) ValueString(key string) (string, error) {
-	i := c.Value(key)
-	if i != nil {
-		return Marshal(i)
-	}
-	return key, nil
+	return c.Variables[key]
 }
 
 // 设置默认请求头 Authorization
@@ -54,7 +58,7 @@ func (c *Client) SetAuthorization(auth string) {
 }
 
 // 获取默认请求头 Authorization
-func (c *Client) Authorization() (auth string) {
+func (c *Client) Authorization() string {
 	if c.Header == nil {
 		return ""
 	}
@@ -123,11 +127,16 @@ func (c *Client) AddValue(adder Adder, data Field, v reflect.Value) error {
 			return nil
 		}
 		if data.Value != "" {
-			s, err := c.ValueString(data.Value)
-			if err != nil {
-				return err
+			i := c.Value(data.Value)
+			if i != nil {
+				s, err := Marshal(i)
+				if err != nil {
+					return err
+				}
+				adder.Add(data.Name, s)
+			} else {
+				adder.Add(data.Name, data.Value)
 			}
-			adder.Add(data.Name, s)
 			return nil
 		}
 	}
