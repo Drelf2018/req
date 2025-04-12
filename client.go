@@ -233,6 +233,48 @@ func (c *Client) MakeJSONMap(body []Field, value reflect.Value) (m map[string]an
 	return
 }
 
+// 新建带上下文的请求
+func (c *Client) NewRequestWithContext(ctx context.Context, api API) (req *http.Request, err error) {
+	// 提取 API 中字段
+	task := LoadTask(api)
+	// 获取 API 的值(reflect.Value)以便后续添加参数
+	value := reflect.Indirect(reflect.ValueOf(api))
+	// 获取请求体
+	var r io.Reader
+	if body, ok := api.(APIBody); ok {
+		r, err = body.Body(c, task.Body, value, api)
+		if err != nil {
+			return
+		}
+	}
+	// 新建请求
+	req, err = http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), r)
+	if err != nil {
+		return
+	}
+	// 获取请求参数
+	if query, ok := api.(APIQuery); ok {
+		err = query.Query(req, c, task.Query, value, api)
+	} else {
+		err = c.AddQuery(req, task.Query, value)
+	}
+	if err != nil {
+		return
+	}
+	// 获取请求头
+	if header, ok := api.(APIHeader); ok {
+		err = header.Header(req, c, task.Header, value, api)
+	} else {
+		err = c.AddHeader(req, task.Header, value)
+	}
+	return
+}
+
+// 新建请求
+func (c *Client) NewRequest(api API) (req *http.Request, err error) {
+	return c.NewRequestWithContext(context.Background(), api)
+}
+
 type CookieAdder struct {
 	URL *url.URL
 	http.CookieJar
@@ -252,9 +294,9 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	var r io.Reader
 	if body, ok := api.(APIBody); ok {
 		r, err = body.Body(c, task.Body, value, api)
-	}
-	if err != nil {
-		return
+		if err != nil {
+			return
+		}
 	}
 	// 新建请求
 	req, err := http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), r)
