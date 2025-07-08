@@ -284,6 +284,9 @@ func (c *CookieAdder) Add(key, val string) {
 	c.CookieJar.SetCookies(c.URL, []*http.Cookie{{Name: key, Value: val}})
 }
 
+// 发送请求前的 hook
+var BeforeDo func(cli *http.Client, req *http.Request, retried int)
+
 // 发送带上下文的请求
 func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
 	// 提取 API 中字段
@@ -341,6 +344,9 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	}
 	// 发送请求
 	checker, isChecker := api.(CheckResponse)
+	if BeforeDo != nil {
+		BeforeDo(&cli, req, 0)
+	}
 	resp, err = cli.Do(req)
 	// 检验响应
 	if err == nil {
@@ -359,6 +365,9 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 					break
 				}
 				time.Sleep(d)
+				if BeforeDo != nil {
+					BeforeDo(&cli, req, i+1)
+				}
 				resp, err = cli.Do(req)
 				if err == nil {
 					if isChecker {
