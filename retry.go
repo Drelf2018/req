@@ -12,8 +12,8 @@ import (
 // 值表示最大重试次数
 type DoubleTicker int
 
-func (t DoubleTicker) NextRetry(num int) (time.Duration, bool) {
-	return (1 << num) * time.Second, num < int(t)
+func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
+	return (1 << retried) * time.Second, retried < int(t)
 }
 
 // “试”不过三
@@ -35,8 +35,8 @@ var _ RetryTicker = (*ForeverTicker)(nil)
 
 type zeroTicker int
 
-func (t zeroTicker) NextRetry(num int) (time.Duration, bool) {
-	return 0, num < int(t)
+func (t zeroTicker) NextRetry(retried int) (time.Duration, bool) {
+	return 0, retried < int(t)
 }
 
 // 零间隔重试器
@@ -53,10 +53,10 @@ func ZeroTicker(maxRetries int, whySafe string) RetryTicker {
 // 前两项为第一次、第二次重试间隔时间，之后按照斐波那契规则返回新间隔时间，第三项为最大单次重试间隔时间
 type FibonacciTicker [3]time.Duration
 
-func (t *FibonacciTicker) NextRetry(num int) (time.Duration, bool) {
-	switch num {
+func (t *FibonacciTicker) NextRetry(retried int) (time.Duration, bool) {
+	switch retried {
 	case 0, 1:
-		return t[num], t[num] <= t[2]
+		return t[retried], t[retried] <= t[2]
 	default:
 		t[0], t[1] = t[1], t[0]+t[1]
 		return t[1], t[1] <= t[2]

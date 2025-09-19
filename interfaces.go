@@ -10,8 +10,8 @@ import (
 
 // API 接口
 type API interface {
-	RawURL() string
 	Method() string
+	RawURL() string
 }
 
 // API 请求体
@@ -36,23 +36,35 @@ type Adder interface {
 
 var _ Adder = (*url.Values)(nil)
 var _ Adder = (*http.Header)(nil)
-var _ Adder = (*CookieAdder)(nil)
 
-// 检验响应
-type CheckResponse interface {
-	CheckResponse(*http.Response) error
+type FuncAdder func(string, string)
+
+func (f FuncAdder) Add(key, val string) {
+	f(key, val)
 }
+
+var _ Adder = FuncAdder(nil)
 
 // 重试计时器
 type RetryTicker interface {
 	// 下次重试前需要等待的时间
 	//
-	// 参数 num 代表已重试次数 从 0 开始
+	// 参数 retried 表示从 0 开始的已重试次数
 	//
-	// 返回值 time.Duration 代表需要等待的时间
+	// 返回值 delay 表示需要等待的时间
 	//
-	// 返回值 bool 代表是否继续重试
-	NextRetry(num int) (time.Duration, bool)
+	// 返回值 ok 表示是否继续重试
+	NextRetry(retried int) (delay time.Duration, ok bool)
+}
+
+// 请求前钩子
+type BeforeRequest interface {
+	BeforeRequest(req *http.Request, cli *Client, api API, retried int)
+}
+
+// 检验响应
+type CheckResponse interface {
+	CheckResponse(resp *http.Response, cli *Client, api API, retried int) error
 }
 
 // 可解包出错误的接口返回值

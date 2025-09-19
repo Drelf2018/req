@@ -110,7 +110,7 @@ func JoinPath(u *url.URL, elem ...string) *url.URL {
 // 当 rawURL 以 "/" 开头时才会拼接
 func (c *Client) URL(rawURL string) string {
 	if c.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
-		rawURL = JoinPath(c.BaseURL, rawURL).String()
+		return JoinPath(c.BaseURL, rawURL).String()
 	}
 	return rawURL
 }
@@ -233,19 +233,16 @@ func (c *Client) MakeJSONMap(body []Field, value reflect.Value) (m map[string]an
 	return
 }
 
-// 新建带上下文的请求
-func (c *Client) NewRequestWithContext(ctx context.Context, api API) (req *http.Request, err error) {
-	// 提取 API 中字段
-	task := LoadTask(api)
-	// 获取 API 的值(reflect.Value)以便后续添加参数
-	value := reflect.Indirect(reflect.ValueOf(api))
+func (c *Client) newRequest(ctx context.Context, api API, task *Task, value reflect.Value) (req *http.Request, err error) {
 	// 获取请求体
 	var r io.Reader
 	if body, ok := api.(APIBody); ok {
 		r, err = body.Body(c, task.Body, value, api)
-		if err != nil {
-			return
-		}
+	} else if api.Method() == http.MethodPost {
+		r, err = PostJSON{}.Body(c, task.Body, value, api)
+	}
+	if err != nil {
+		return
 	}
 	// 新建请求
 	req, err = http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), r)
@@ -270,22 +267,15 @@ func (c *Client) NewRequestWithContext(ctx context.Context, api API) (req *http.
 	return
 }
 
+// 新建带上下文的请求
+func (c *Client) NewRequestWithContext(ctx context.Context, api API) (req *http.Request, err error) {
+	return c.newRequest(ctx, api, LoadTask(api), reflect.Indirect(reflect.ValueOf(api)))
+}
+
 // 新建请求
 func (c *Client) NewRequest(api API) (req *http.Request, err error) {
 	return c.NewRequestWithContext(context.Background(), api)
 }
-
-type CookieAdder struct {
-	URL *url.URL
-	http.CookieJar
-}
-
-func (c *CookieAdder) Add(key, val string) {
-	c.CookieJar.SetCookies(c.URL, []*http.Cookie{{Name: key, Value: val}})
-}
-
-// 发送请求前的 hook
-var BeforeDo func(cli *http.Client, req *http.Request, retried int)
 
 // 发送带上下文的请求
 func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
@@ -293,34 +283,8 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	task := LoadTask(api)
 	// 获取 API 的值(reflect.Value)以便后续添加参数
 	value := reflect.Indirect(reflect.ValueOf(api))
-	// 获取请求体
-	var r io.Reader
-	if body, ok := api.(APIBody); ok {
-		r, err = body.Body(c, task.Body, value, api)
-		if err != nil {
-			return
-		}
-	}
 	// 新建请求
-	req, err := http.NewRequestWithContext(ctx, api.Method(), c.URL(api.RawURL()), r)
-	if err != nil {
-		return
-	}
-	// 获取请求参数
-	if query, ok := api.(APIQuery); ok {
-		err = query.Query(req, c, task.Query, value, api)
-	} else {
-		err = c.AddQuery(req, task.Query, value)
-	}
-	if err != nil {
-		return
-	}
-	// 获取请求头
-	if header, ok := api.(APIHeader); ok {
-		err = header.Header(req, c, task.Header, value, api)
-	} else {
-		err = c.AddHeader(req, task.Header, value)
-	}
+	req, err := c.newRequest(ctx, api, task, value)
 	if err != nil {
 		return
 	}
@@ -334,7 +298,7 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 		if cli.Jar == nil {
 			cli.Jar, _ = cookiejar.New(nil)
 		}
-		adder := &CookieAdder{req.URL, cli.Jar}
+		adder := FuncAdder(func(key, val string) { cli.Jar.SetCookies(req.URL, []*http.Cookie{{Name: key, Value: val}}) })
 		for _, data := range task.Cookie {
 			err = c.AddValue(adder, data, value)
 			if err != nil {
@@ -343,15 +307,16 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 		}
 	}
 	// 发送请求
-	checker, isChecker := api.(CheckResponse)
-	if BeforeDo != nil {
-		BeforeDo(&cli, req, 0)
+	hook, isHook := api.(BeforeRequest)
+	if isHook {
+		hook.BeforeRequest(req, c, api, 0)
 	}
 	resp, err = cli.Do(req)
 	// 检验响应
+	checker, isChecker := api.(CheckResponse)
 	if err == nil {
 		if isChecker {
-			err = checker.CheckResponse(resp)
+			err = checker.CheckResponse(resp, c, api, 0)
 		} else if resp.StatusCode != 200 {
 			err = fmt.Errorf("http: response status: %s", resp.Status)
 		}
@@ -360,18 +325,18 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	if err != nil {
 		if ticker, ok := api.(RetryTicker); ok {
 			for i := 0; err != nil; i++ {
-				d, ok := ticker.NextRetry(i)
+				delay, ok := ticker.NextRetry(i)
 				if !ok {
 					break
 				}
-				time.Sleep(d)
-				if BeforeDo != nil {
-					BeforeDo(&cli, req, i+1)
+				time.Sleep(delay)
+				if isHook {
+					hook.BeforeRequest(req, c, api, i+1)
 				}
 				resp, err = cli.Do(req)
 				if err == nil {
 					if isChecker {
-						err = checker.CheckResponse(resp)
+						err = checker.CheckResponse(resp, c, api, i+1)
 					} else if resp.StatusCode != 200 {
 						err = fmt.Errorf("http: response status: %s", resp.Status)
 					}
@@ -483,4 +448,60 @@ func (c *Client) JSONWithContext(ctx context.Context, api API) (data any, err er
 func (c *Client) JSON(api API) (data any, err error) {
 	err = c.Result(api, &data)
 	return
+}
+
+type ClientOption interface {
+	ClientOption(cli *Client) error
+}
+
+type ClientURL string
+
+func (c ClientURL) ClientOption(cli *Client) (err error) {
+	cli.BaseURL, err = url.Parse(string(c))
+	return
+}
+
+var _ ClientOption = ClientURL("")
+
+type ClientHeaders map[string]string
+
+func (c ClientHeaders) ClientOption(cli *Client) error {
+	if cli.Header == nil {
+		cli.Header = make(http.Header)
+	}
+	for k, v := range c {
+		cli.Header.Set(k, v)
+	}
+	return nil
+}
+
+var _ ClientOption = ClientHeaders{}
+
+func ClientHeader(key, val string) ClientHeaders {
+	return ClientHeaders{key: val}
+}
+
+type ClientVariables map[string]string
+
+func (c ClientVariables) ClientOption(cli *Client) error {
+	if cli.Variables == nil {
+		cli.Variables = make(map[string]any)
+	}
+	for k, v := range c {
+		cli.Variables[k] = v
+	}
+	return nil
+}
+
+var _ ClientOption = ClientVariables{}
+
+func NewClient(opts ...ClientOption) (*Client, error) {
+	c := &Client{}
+	for _, opt := range opts {
+		err := opt.ClientOption(c)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
 }
