@@ -288,8 +288,10 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	if err != nil {
 		return
 	}
+	// 创建 Client 拷贝
+	clientCopy := c.Client
+	cli := &clientCopy
 	// 初始化 CookieJar
-	cli := c.Client
 	if cookieJar, ok := api.(http.CookieJar); ok {
 		cli.Jar = cookieJar
 	}
@@ -309,14 +311,14 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 	// 发送请求
 	hook, isHook := api.(BeforeRequest)
 	if isHook {
-		hook.BeforeRequest(req, c, api, 0)
+		hook.BeforeRequest(req, cli, api, 0)
 	}
 	resp, err = cli.Do(req)
 	// 检验响应
 	checker, isChecker := api.(CheckResponse)
 	if err == nil {
 		if isChecker {
-			err = checker.CheckResponse(resp, c, api, 0)
+			err = checker.CheckResponse(resp, cli, api, 0)
 		} else if resp.StatusCode != 200 {
 			err = fmt.Errorf("http: response status: %s", resp.Status)
 		}
@@ -331,12 +333,12 @@ func (c *Client) DoWithContext(ctx context.Context, api API) (resp *http.Respons
 				}
 				time.Sleep(delay)
 				if isHook {
-					hook.BeforeRequest(req, c, api, i+1)
+					hook.BeforeRequest(req, cli, api, i+1)
 				}
 				resp, err = cli.Do(req)
 				if err == nil {
 					if isChecker {
-						err = checker.CheckResponse(resp, c, api, i+1)
+						err = checker.CheckResponse(resp, cli, api, i+1)
 					} else if resp.StatusCode != 200 {
 						err = fmt.Errorf("http: response status: %s", resp.Status)
 					}

@@ -59,12 +59,12 @@ type RetryTicker interface {
 
 // 请求前钩子
 type BeforeRequest interface {
-	BeforeRequest(req *http.Request, cli *Client, api API, retried int)
+	BeforeRequest(req *http.Request, cli *http.Client, api API, retried int)
 }
 
 // 检验响应
 type CheckResponse interface {
-	CheckResponse(resp *http.Response, cli *Client, api API, retried int) error
+	CheckResponse(resp *http.Response, cli *http.Client, api API, retried int) error
 }
 
 // 可解包出错误的接口返回值
