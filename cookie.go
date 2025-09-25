@@ -139,3 +139,20 @@ func (s *StructCookieJar[T]) UnmarshalJSON(data []byte) error {
 }
 
 var _ json.Unmarshaler = (*StructCookieJar[any])(nil)
+
+func (s *StructCookieJar[T]) BeforeRequest(req *http.Request, cli *http.Client, api API, retried int) {
+	if before, ok := any(s.C).(BeforeRequest); ok {
+		before.BeforeRequest(req, cli, api, retried)
+	}
+}
+
+var _ BeforeRequest = (*StructCookieJar[any])(nil)
+
+func (s *StructCookieJar[T]) CheckResponse(resp *http.Response, cli *http.Client, api API, retried int) error {
+	if checker, ok := any(s.C).(CheckResponse); ok {
+		return checker.CheckResponse(resp, cli, api, retried)
+	}
+	return nil
+}
+
+var _ CheckResponse = (*StructCookieJar[any])(nil)
