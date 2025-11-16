@@ -1,4 +1,4 @@
-package req
+package cookie
 
 import (
 	"context"
@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-type CookieState int
+type State int
 
 const (
-	Unverified CookieState = iota // 未验证
-	Verifying                     // 验证中
-	Verified                      // 已验证
-	Invalid                       // 已失效
+	Unverified State = iota // 未验证
+	Verifying               // 验证中
+	Verified                // 已验证
+	Invalid                 // 已失效
 )
 
 type RefreshableCookieJar interface {
@@ -29,23 +29,23 @@ type RefreshableCookieJar interface {
 	Refresh(context.Context) error
 }
 
-type CookieItem struct {
+type Cookies struct {
 	// 具体实例
 	RefreshableCookieJar
 
 	// 当前状态
-	state CookieState
+	state State
 
 	// 刷新锁
 	m sync.Mutex
 }
 
-func (c *CookieItem) State() CookieState {
+func (c *Cookies) State() State {
 	return c.state
 }
 
 // 验证 Cookie
-func (c *CookieItem) Verify(ctx context.Context) error {
+func (c *Cookies) Verify(ctx context.Context) error {
 	c.m.Lock()
 	defer c.m.Unlock()
 
@@ -71,24 +71,24 @@ func (c *CookieItem) Verify(ctx context.Context) error {
 	return nil
 }
 
-func (c *CookieItem) MarshalJSON() ([]byte, error) {
+func (c *Cookies) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.RefreshableCookieJar)
 }
 
-var _ json.Marshaler = (*CookieItem)(nil)
+var _ json.Marshaler = (*Cookies)(nil)
 
-func (c *CookieItem) UnmarshalJSON(data []byte) error {
+func (c *Cookies) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &c.RefreshableCookieJar)
 }
 
-var _ json.Unmarshaler = (*CookieItem)(nil)
+var _ json.Unmarshaler = (*Cookies)(nil)
 
-type CookiePool struct {
+type Pool struct {
 	// Cookie 失效钩子
-	InvalidCookieHook func(cookie *CookieItem, err error)
+	InvalidCookieHook func(cookie *Cookies, err error)
 
 	// Cookie 切片
-	items []*CookieItem
+	items []*Cookies
 
 	// 检测刷新的间隔
 	refresh time.Duration
@@ -98,17 +98,17 @@ type CookiePool struct {
 }
 
 // 获取全部 Cookie
-func (p *CookiePool) All() []*CookieItem {
+func (p *Pool) All() []*Cookies {
 	p.rw.RLock()
 	defer p.rw.RUnlock()
 	return p.items
 }
 
 // 获取随机 Cookie
-func (p *CookiePool) Random() *CookieItem {
+func (p *Pool) Random() *Cookies {
 	p.rw.RLock()
 	defer p.rw.RUnlock()
-	verifiedItems := make([]*CookieItem, 0, len(p.items))
+	verifiedItems := make([]*Cookies, 0, len(p.items))
 	for _, item := range p.items {
 		if item.state == Verified {
 			verifiedItems = append(verifiedItems, item)
@@ -121,7 +121,7 @@ func (p *CookiePool) Random() *CookieItem {
 }
 
 // 定时验证
-func (p *CookiePool) Verify(ctx context.Context, item *CookieItem, refresh time.Duration) {
+func (p *Pool) Verify(ctx context.Context, item *Cookies, refresh time.Duration) {
 	ticker := time.NewTicker(refresh)
 	defer ticker.Stop()
 
@@ -143,8 +143,8 @@ func (p *CookiePool) Verify(ctx context.Context, item *CookieItem, refresh time.
 }
 
 // 添加 CookieJar
-func (p *CookiePool) AddWithRefresh(jar RefreshableCookieJar, refresh time.Duration) context.CancelFunc {
-	cookie := &CookieItem{RefreshableCookieJar: jar}
+func (p *Pool) AddWithRefresh(jar RefreshableCookieJar, refresh time.Duration) context.CancelFunc {
+	cookie := &Cookies{RefreshableCookieJar: jar}
 	ctx, cancel := context.WithCancel(context.Background())
 	// 开始定时验证
 	go p.Verify(ctx, cookie, refresh)
@@ -164,10 +164,10 @@ func (p *CookiePool) AddWithRefresh(jar RefreshableCookieJar, refresh time.Durat
 }
 
 // 添加 CookieJar
-func (p *CookiePool) Add(jar RefreshableCookieJar) context.CancelFunc {
+func (p *Pool) Add(jar RefreshableCookieJar) context.CancelFunc {
 	return p.AddWithRefresh(jar, p.refresh)
 }
 
-func NewCookiePool(refresh time.Duration) *CookiePool {
-	return &CookiePool{refresh: refresh}
+func NewCookiePool(refresh time.Duration) *Pool {
+	return &Pool{refresh: refresh}
 }
