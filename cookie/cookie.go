@@ -9,7 +9,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/Drelf2018/req"
+	"github.com/Drelf2018/req/method"
 )
 
 var offsetsCache sync.Map // map[uintptr]map[string]uintptr
@@ -36,7 +36,7 @@ func parse(t reflect.Type, parentOffset uintptr, offsets map[string]uintptr) {
 }
 
 func load(v any) (unsafe.Pointer, map[string]uintptr) {
-	e := (*req.Any)(unsafe.Pointer(&v))
+	e := (*method.Emptyface)(unsafe.Pointer(&v))
 	if value, ok := offsetsCache.Load(uintptr(e.Type)); ok {
 		return e.Value, value.(map[string]uintptr)
 	}
