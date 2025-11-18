@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Drelf2018/req/cookie"
 	"github.com/Drelf2018/req/method"
 )
 
@@ -180,7 +181,11 @@ func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Respon
 	clientCopy := s.Client
 	cli := &clientCopy
 	// 设置 CookieJar
-	cli.Jar = method.NewCookieJar(req, value, task.Cookie, api)
+	jars := cookie.NewJars(s.Client.Jar, api)
+	for _, field := range task.Cookie {
+		method.AddValue(ctx, value, field, jars.Add)
+	}
+	cli.Jar = jars
 	// 发送请求
 	if before, ok := api.(BeforeRequest); ok {
 		err = before.BeforeRequest(cli, req, api)

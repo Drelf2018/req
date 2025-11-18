@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -136,15 +135,6 @@ func AddValue(ctx context.Context, val reflect.Value, field reflect.StructField,
 	}
 }
 
-// MakeURLValues 根据提供的 []StructField 制作 url.Values
-func MakeURLValues(ctx context.Context, val reflect.Value, fields []reflect.StructField) url.Values {
-	u := make(url.Values, len(fields))
-	for _, field := range fields {
-		AddValue(ctx, val, field, u.Add)
-	}
-	return u
-}
-
 // MakeJSONMap 根据提供的 []StructField 制作 map[string]any
 func MakeJSONMap(ctx context.Context, val reflect.Value, body []reflect.StructField) map[string]any {
 	m := make(map[string]any, len(body))
@@ -179,6 +169,15 @@ func MakeJSONMap(ctx context.Context, val reflect.Value, body []reflect.StructFi
 	return m
 }
 
+// MakeURLValues 根据提供的 []StructField 制作 url.Values
+func MakeURLValues(ctx context.Context, val reflect.Value, fields []reflect.StructField) url.Values {
+	u := make(url.Values, len(fields))
+	for _, field := range fields {
+		AddValue(ctx, val, field, u.Add)
+	}
+	return u
+}
+
 // AddQuery 向 req 请求添加请求参数
 func AddQuery(req *http.Request, val reflect.Value, query []reflect.StructField) {
 	q := MakeURLValues(req.Context(), val, query)
@@ -193,32 +192,4 @@ func AddHeader(req *http.Request, val reflect.Value, header []reflect.StructFiel
 	for _, field := range header {
 		AddValue(ctx, val, field, req.Header.Add)
 	}
-}
-
-// AddCookie 向 CookieJar 添加 Cookie
-func AddCookie(req *http.Request, val reflect.Value, cookie []reflect.StructField, jar http.CookieJar) {
-	q := MakeURLValues(req.Context(), val, cookie)
-	if len(q) == 0 {
-		return
-	}
-	cookies := make([]*http.Cookie, 0, len(q))
-	for k, vs := range q {
-		for _, v := range vs {
-			cookies = append(cookies, &http.Cookie{Name: k, Value: v})
-		}
-	}
-	jar.SetCookies(req.URL, cookies)
-}
-
-// NewCookieJar 创建新的 http.CookieJar
-func NewCookieJar(req *http.Request, val reflect.Value, cookie []reflect.StructField, api any) (jar http.CookieJar) {
-	jar, _ = api.(http.CookieJar)
-	// 添加字段中 Cookie
-	if len(cookie) != 0 {
-		if jar == nil {
-			jar, _ = cookiejar.New(nil)
-		}
-		AddCookie(req, val, cookie, jar)
-	}
-	return
 }
