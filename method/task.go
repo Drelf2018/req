@@ -20,7 +20,11 @@ type Task struct {
 
 // NewTask 根据给定的结构体类型生成请求任务
 func NewTask(v any) (task Task) {
-	for _, f := range reflect.VisibleFields(reflect.TypeOf(v)) {
+	typ := reflect.TypeOf(v)
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	for _, f := range reflect.VisibleFields(typ) {
 		tag := f.Tag.Get("req")
 		if tag == "" {
 			continue
