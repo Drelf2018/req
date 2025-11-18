@@ -20,38 +20,33 @@ import (
 type Session struct {
 	http.Client
 
-	// 基础路径
-	// 若 API 路径以 "/" 开头则会拼接在此路径后
+	// 基础路径，若 API 路径以 "/" 开头则会拼接在此路径后
 	BaseURL *url.URL
 
-	// 默认请求头
+	// 默认请求头，会自动为每个请求添加
 	Header http.Header
 
-	// 自定义变量
-	// 当字段 api tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
+	// 自定义变量，当字段 api tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
 	Variables map[string]any
 }
 
-// Set 设置 Variables 中的值
+var ErrInvalidKeyPrefix = errors.New("req: key must start with '$'")
+
+// Set 设置自定义变量的值
 func (s *Session) Set(key string, value any) error {
 	if s.Variables == nil {
 		s.Variables = make(map[string]any)
 	}
 	if !strings.HasPrefix(key, "$") {
-		return errors.New("req: key must start with '$'")
+		return ErrInvalidKeyPrefix
 	}
 	s.Variables[key] = value
 	return nil
 }
 
-// Value 获取 Variables 中的值
-//
-// 参数 key 必须以 "$" 开头
+// Value 获取自定义变量的值，变量名必须以 "$" 开头
 func (s *Session) Value(key string) any {
-	if s.Variables == nil {
-		return nil
-	}
-	if strings.HasPrefix(key, "$") {
+	if s.Variables != nil && strings.HasPrefix(key, "$") {
 		return s.Variables[key]
 	}
 	return nil
@@ -89,38 +84,29 @@ func (s *Session) UserAgent() string {
 	return s.Header.Get("User-Agent")
 }
 
-// JoinPath returns a new [URL] with the provided path elements joined to
-// any existing path and the resulting path cleaned of any ./ or ../ elements.
-// Any sequences of multiple / characters will be reduced to a single /.
-func JoinPath(u *url.URL, elem ...string) *url.URL {
-	elem = append([]string{u.EscapedPath()}, elem...)
+// URL 拼接基础路径和 rawURL ，如果后者不是以 "/" 开头会直接返回其原值
+func (s *Session) URL(rawURL string) string {
+	if s.BaseURL == nil || !strings.HasPrefix(rawURL, "/") {
+		return rawURL
+
+	}
 	var p string
-	if !strings.HasPrefix(elem[0], "/") {
+	prefix := s.BaseURL.EscapedPath()
+	if !strings.HasPrefix(prefix, "/") {
 		// Return a relative path if u is relative,
 		// but ensure that it contains no ../ elements.
-		elem[0] = "/" + elem[0]
-		p = path.Join(elem...)[1:]
+		p = path.Join("/"+prefix, rawURL)[1:]
 	} else {
-		p = path.Join(elem...)
+		p = path.Join(prefix, rawURL)
 	}
 	// path.Join will remove any trailing slashes.
 	// Preserve at least one.
-	if strings.HasSuffix(elem[len(elem)-1], "/") && !strings.HasSuffix(p, "/") {
+	if strings.HasSuffix(rawURL, "/") && !strings.HasSuffix(p, "/") {
 		p += "/"
 	}
-	url := *u
+	url := *s.BaseURL
 	url.Path = p
-	return &url
-}
-
-// URL 拼接 BaseURL 和提供的 rawURL
-//
-// 当 rawURL 以 "/" 开头时才会拼接
-func (s *Session) URL(rawURL string) string {
-	if s.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
-		return JoinPath(s.BaseURL, rawURL).String()
-	}
-	return rawURL
+	return url.String()
 }
 
 // CreateRequest 创建新请求
@@ -140,7 +126,7 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 	if err != nil {
 		return
 	}
-	// 获取请求参数
+	// 设置请求参数
 	if query, ok := api.(method.APIQuery); ok {
 		err = query.Query(req, value, task.Query)
 		if err != nil {
@@ -149,14 +135,21 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 	} else {
 		method.AddQuery(req, value, task.Query)
 	}
-	// 获取请求头
+	// 设置请求头
 	if s.Header != nil {
 		req.Header = s.Header.Clone()
 	}
 	if header, ok := api.(method.APIHeader); ok {
 		err = header.Header(req, value, task.Header)
+		if err != nil {
+			return
+		}
 	} else {
 		method.AddHeader(req, value, task.Header)
+	}
+	// 设置自定义参数
+	if custom, ok := api.(method.APICustom); ok {
+		err = custom.Custom(req, value, task.Custom)
 	}
 	return
 }
@@ -171,8 +164,9 @@ func (s *Session) NewRequest(api API) (req *http.Request, err error) {
 	return s.NewRequestWithContext(context.Background(), api)
 }
 
-// do 发送请求
-func (s *Session) do(ctx context.Context, api API) (resp *http.Response, err error) {
+// DoWithContext 发送带上下文的请求
+func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
+	ctx = WithMap(ctx, s.Variables)
 	// 提取 API 中字段
 	task := method.LoadTask(api)
 	// 获取 API 的值用于获取参数值
@@ -180,18 +174,11 @@ func (s *Session) do(ctx context.Context, api API) (resp *http.Response, err err
 	// 新建请求
 	req, err := s.CreateRequest(ctx, api, task, value)
 	if err != nil {
-		return nil, err
-	}
-	// 设置自定义参数
-	if custom, ok := api.(method.APICustom); ok {
-		err = custom.Custom(req, value, task.Custom)
-		if err != nil {
-			return
-		}
+		return
 	}
 	// 创建 Client 拷贝
-	ClientCopy := s.Client
-	cli := &ClientCopy
+	clientCopy := s.Client
+	cli := &clientCopy
 	// 设置 CookieJar
 	cli.Jar = method.NewCookieJar(req, value, task.Cookie, api)
 	// 发送请求
@@ -206,16 +193,11 @@ func (s *Session) do(ctx context.Context, api API) (resp *http.Response, err err
 	if err == nil {
 		if checker, ok := api.(CheckResponse); ok {
 			err = checker.CheckResponse(cli, resp, api)
-		} else if resp.StatusCode != 200 {
-			err = fmt.Errorf("http: response status: %s", resp.Status)
+		} else if resp.StatusCode != http.StatusOK {
+			err = fmt.Errorf("req: status code not ok: %s", resp.Status)
 		}
 	}
 	return
-}
-
-// DoWithContext 发送带上下文的请求
-func (s *Session) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
-	return s.do(WithMap(ctx, s.Variables), api)
 }
 
 // Do 发送请求
@@ -224,25 +206,23 @@ func (s *Session) Do(api API) (*http.Response, error) {
 }
 
 // ContentWithContext 获取带上下文的请求结果
-func (s *Session) ContentWithContext(ctx context.Context, api API) (p []byte, err error) {
+func (s *Session) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
 	resp, err := s.DoWithContext(ctx, api)
 	if err != nil {
 		return nil, err
 	}
-	p, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
 // Content 获取请求结果
-func (s *Session) Content(api API) (p []byte, err error) {
+func (s *Session) Content(api API) ([]byte, error) {
 	resp, err := s.Do(api)
 	if err != nil {
 		return nil, err
 	}
-	p, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
 // TextWithContext 获取带上下文的请求结果字符串
@@ -281,42 +261,38 @@ func (s *Session) Write(api API, name string, perm os.FileMode) error {
 	return os.WriteFile(name, p, perm)
 }
 
-// ResultWithContext 将带上下文的请求结果以 JSON 格式解析进对象
-//
-// result 必须是指针
+// ResultWithContext 将带上下文的请求结果以 JSON 格式解析进对象，该对象必须是指针
 func (s *Session) ResultWithContext(ctx context.Context, api API, result any) (err error) {
 	resp, err := s.DoWithContext(ctx, api)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
-
+	// 反序列化
 	err = json.NewDecoder(resp.Body).Decode(result)
 	if err != nil {
 		return
 	}
-
+	// 解包错误
 	if i, ok := result.(Unwrap); ok {
 		err = i.Unwrap()
 	}
 	return
 }
 
-// Result 将请求结果以 JSON 格式解析进对象
-//
-// result 必须是指针
+// Result 将请求结果以 JSON 格式解析进对象，该对象必须是指针
 func (s *Session) Result(api API, result any) (err error) {
 	resp, err := s.Do(api)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
-
+	// 反序列化
 	err = json.NewDecoder(resp.Body).Decode(result)
 	if err != nil {
 		return
 	}
-
+	// 解包错误
 	if i, ok := result.(Unwrap); ok {
 		err = i.Unwrap()
 	}

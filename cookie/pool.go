@@ -58,13 +58,13 @@ func (c *Cookies) Verify(ctx context.Context) error {
 	err := ctx.Err()
 	if err != nil {
 		c.state = Invalid
-		return fmt.Errorf("req: verify cookie failed: %w", err)
+		return fmt.Errorf("req/cookie: verify cookie failed: %w", err)
 	}
 
 	err = c.Refresh(ctx)
 	if err != nil {
 		c.state = Invalid
-		return fmt.Errorf("req: refresh cookie failed: %w", err)
+		return fmt.Errorf("req/cookie: refresh cookie failed: %w", err)
 	}
 
 	c.state = Verified
