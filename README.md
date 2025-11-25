@@ -11,674 +11,528 @@ _✨ 通过结构体发送请求 ✨_
 在正式开始使用前，我们需要了解如何实现一个 `API` 接口。
 
 ```go
-// API 信息
-type APIData interface {
-	RawURL() string
-	Method() string
-}
-
-// API 构造器
-type APICreator interface {
-	NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (*http.Request, error)
-}
-
 // API 接口
 type API interface {
-	APIData
-	APICreator
+	Method() string
+	RawURL() string
 }
 ```
 
-在 [interfaces.go](./interfaces.go) 中定义了 `APIData` `APICreator` `API` 三个接口。
-
-其中 `APIData` 是用来描述接口的，包括返回请求地址的 `RawURL() string` 方法和返回请求方式的 `Method() string` 方法，通常需要用户自行实现。
-
-此外 `APICreator` 是用来构造底层 `*http.Request` 请求的构造器，一般不需用户自己实现。
+在 [`interfaces.go`](interfaces.go) 中定义了 `API` 接口，它是用来描述请求的，包括请求地址 `RawURL` 方法和请求方法 `Method` 方法，通常需要用户自行实现。
 
 ```go
-// GET 请求构造器
-//
-// 直接嵌入结构体即可使用
-type Get struct{}
+type SimpleGet struct{}
+
+func (SimpleGet) Method() string {
+	return http.MethodGet
+}
+
+func (SimpleGet) RawURL() string {
+	return "https://httpbin.org/get"
+}
+
+func TestSimpleGet(t *testing.T) {
+	text, err := req.Text(SimpleGet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
+这样，你就实现了一个最小且可用的 `API` 结构体，并且使用默认会话发起请求。
+
+## 为 `API` 添加参数
+
+### 为 `GET` 请求添加路径参数和查询参数
+
+路径参数可以简单的在 `RawURL` 方法中自行添加，而查询参数则需要通过本项目神奇的反射机制进行设置。
+
+```go
+type Get struct {
+	UID       string
+	PageLimit int `req:"query" default:"30"`
+}
 
 func (Get) Method() string {
 	return http.MethodGet
 }
 
-// 可以通过这个方法学习如何自己实现一个构造器
-func (Get) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (req *http.Request, err error) {
-	// 因为是 GET 请求所以不添加 body
-	req, err = cli.AddBody(ctx, api, nil)
-	if err != nil {
-		return
-	}
-	// 提取 API 中字段
-	task := LoadTask(api)
-	// 获取 API 的值(reflect.Value)以便后续添加参数
-	value := reflect.Indirect(reflect.ValueOf(api))
-	// 添加请求参数
-	err = cli.AddQuery(req, task.Query, value)
-	if err == nil {
-		// 添加请求头
-		err = cli.AddHeader(req, task.Header, value)
-	}
-	return
+func (g Get) RawURL() string {
+	return fmt.Sprintf("https://httpbin.org/anything/followers/%s", g.UID)
 }
 
-var _ APICreator = Get{}
-```
-
-在 [method.go](./method.go) 中定义了 `Get` 结构体，它就实现了 `Method() string` 方法和 `APICreator` 接口。如果现在难以理解可以先跳过，我们会在后面详细介绍。
-
-## 使用
-
-### 带有路径参数的 `GET` 请求实例
-
-```go
-type User struct {
-	req.Get
-	UID string
-}
-
-func (u User) RawURL() string {
-	return "https://httpbin.org/anything/user/" + u.UID
-}
-
-func TestUser(t *testing.T) {
-	resp, err := req.Do(User{UID: "114514"})
+func TestGet(t *testing.T) {
+	text, err := req.Text(Get{UID: "10086", PageLimit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	t.Log(text)
 
-	b, err := io.ReadAll(resp.Body)
+	text, err = req.Text(Get{UID: "12306"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(string(b))
+	t.Log(text)
 }
 ```
 
-在上面代码中，我们定义了一个 `User` 结构体，并在其中嵌入了 `req.Get` 字段，代表它隐形实现了 `Method() string` 方法和 `APICreator` 接口，因此我们只需要实现 `RawURL() string` 方法。
-
-因此我们在返回请求地址时拼接了地址和路径参数，并且在后续使用时利用 `User{UID: "114514"}` 填入了参数。
-
-接在在测试代码中使用了 `func req.Do(api req.API) (*http.Response, error)` 函数，它接收一个 `API` 并返回请求结果，我们使用命令 `go test -v -run ^TestUser$` 在屏幕上得到结果。
+字段 `PageLimit` 后有两个标签，分别是 `req:"query"` 和 `default:"30"` 。前者用于声明这个字段要作为请求的 `query` 参数，后者表示该字段值为空时要使用的默认值。例如，测试函数中前后两次请求的地址分别为：
 
 ```
-> go test -v -run ^TestUser$
-=== RUN   TestUser
-    req_test.go:31: {
-          "args": {},
-          "data": "",
-          "files": {},
-          "form": {},
-          "headers": {
-            "Accept-Encoding": "gzip",
-            "Host": "httpbin.org",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.54"
-          },
-          "json": null,
-          "method": "GET",
-          "origin": "xxx.xxx.xxx.xxx",
-          "url": "https://httpbin.org/anything/user/114514"
-        }
-
---- PASS: TestUser (1.18s)
-PASS
-ok      github.com/Drelf2018/req/tests  1.438s
+https://httpbin.org/anything/followers/10086?page_limit=10
 ```
 
-可以看到，代码成功发送了我们设置了路径参数为 `114514` 的 `GET` 请求。
+```
+https://httpbin.org/anything/followers/12306?page_limit=30
+```
 
-### 带有 `Query` `Body` `Header` 参数的 `POST` 请求示例
+细心的朋友可能发现了，字段 `PageLimit` 的值自动设置在了地址中参数 `page_limit` 之后。这是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成下划线参数名的函数 `NameReplacer` 。你也可以自行替换这个函数变量，实现自己的参数名转换函数。
 
 ```go
-type Sign struct {
-	req.PostForm
-	UID           int    `api:"query"`
-	Sign          string `api:"body"`
-	RefreshNow    bool   `api:"body"`
-	Authorization string `api:"header"`
-}
-
-func (Sign) RawURL() string {
-	return "https://httpbin.org/post"
-}
-
-func TestSign(t *testing.T) {
-	i, err := req.JSON(Sign{
-		UID:           114514,
-		Sign:          "逸一时误一世",
-		RefreshNow:    true,
-		Authorization: "Token 1919810",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b, err := json.MarshalIndent(i, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log(string(b))
+// NameReplacer 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
+var NameReplacer = func(s string) string {
+	// ...
 }
 ```
 
-在上面代码中，我们定义了一个 `Sign` 结构体，并在其中嵌入了 `req.PostForm` 字段，这个字段与 `req.Get` 类似。
+### 标签 `req`
 
-同时还添加了 `UID` `Sign` `RefreshNow` `Authorization` 四个字段，它们都带有 `api` 标签。这是本库定义的用来描述某个字段归属的标签，具体来说，这个标签目前支持 `query` `body` `header` `file` `files` 五个值，含义如其名。
+这个标签用于声明字段在请求中的参数类型，例如 `req:"body"` `req:"query"` 等。
 
-接在在测试代码中使用了 `func req.JSON(api req.API) (any, error)` 函数，它接收一个 `API` 并返回请求结果经 `JSON` 反序列化的结果，我们使用命令 `go test -v -run ^TestSign$` 在屏幕上得到结果。
+其完整格式为 `req:"param[:name][,omitempty]"` ，一个具体的例子为 `req:"header:X-Forwarded-For,omitempty"` 。
 
-```
-> go test -v -run ^TestSign$
-=== RUN   TestSign
-    req_test.go:61: {
-          "args": {
-            "uid": "114514"
-          },
-          "data": "",
-          "files": {},
-          "form": {
-            "refresh_now": "true",
-            "sign": "逸一时误一世"
-          },
-          "headers": {
-            "Accept-Encoding": "gzip",
-            "Authorization": "Token 1919810",
-            "Content-Length": "76",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Host": "httpbin.org",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.54",
-          },
-          "json": null,
-          "origin": "xxx.xxx.xxx.xxx",
-          "url": "https://httpbin.org/post?uid=114514"
-        }
---- PASS: TestSign (1.09s)
-PASS
-ok      github.com/Drelf2018/req/tests  1.314s
-```
+`param` 区域是必填的，一般使用 `body` `query` `header` `cookie` 之一，具体原因可见后文。
 
-可以看到，代码成功发送了我们设置了 `Query` 中 `uid=114514`、`FormBody` 中 `sign=逸一时误一世` 和 `refresh_now=true`、`Header` 中 `Authorization=Token 1919810` 和 `Content-Type=application/x-www-form-urlencoded` 的 `POST` 请求。
+`[:name]` 区域是可选的，如果对内置的参数名转换函数结果不满意，可以直接设置这个字段对应的参数名。
 
-### 参数名怎么来的
+`[,omitempty]` 区域是可选的，当字段值是其类型零值并且选用了这个区域，那么就不会生成其对应的参数。
 
-我们发现请求中参数名与字段名并不完全相同 `UID => uid` `RefreshNow => refresh_now` `Authorization => Authorization`
+### 标签 `default`
+
+这个标签用于设置字段值为其类型零值，并且没有在 `req` 标签中设置忽略时的默认值。
+
+在项目 [`method/utils.go`](method/utils.go) 中有一个字符串转对应类型值的函数 `Unmarshal` ，可以把标签中设置的字符串转化成字段类型的值。
 
 ```go
-var (
-	nameReplacer   *strings.Replacer
-	headerReplacer *strings.Replacer
-)
-
-func init() {
-	oldnew1 := []string{"ID", "_id"}
-	for i := 'A'; i <= 'Z'; i++ {
-		oldnew1 = append(oldnew1, string(i)+"ID", "_"+string(i+32)+"id", string(i), "_"+string(i+32))
-	}
-	nameReplacer = strings.NewReplacer(oldnew1...)
-
-	oldnew2 := make([]string, 0, 26*2)
-	for i := 'A'; i <= 'Z'; i++ {
-		oldnew2 = append(oldnew2, string(i), "-"+string(i))
-	}
-	headerReplacer = strings.NewReplacer(oldnew2...)
-}
-
-// 一般字段名替换器
-func NameReplace(s string) string {
-	return nameReplacer.Replace(s)[1:]
-}
-
-// 请求头字段名替换器
-func HeaderReplace(s string) string {
-	return headerReplacer.Replace(s)[1:]
+// Unmarshal 将字符串转换为指定类型的值
+func Unmarshal(value reflect.Value, s string) (any, error) {
+	// ...
 }
 ```
 
-这是因为在 [replacer.go](./replacer.go) 中定义了两种生成字段名的函数，其中 `HeaderReplace` 会用来替换所有带有 `api:"header"` 标签的字段名，剩下的由 `NameReplace` 处理。
+### 为 `POST` 请求添加请求体和请求头
 
-通过阅读代码可以看出，`HeaderReplace` 会将所有大写字母 `X` 替换成 `-X` 这很符合请求头键名的规范，再由函数 `HeaderReplace` 做一个截取，去掉最前面的 `-` 。例如字段名 `ContentType => -Content-Type => Content-Type`
-
-而 `NameReplace` 会将所有 `ID` 替换成 `_id` 或者形如 `XID` 的替换成 `_xid` 或者 `X` 替换成 `_x` ，再由函数去掉最前面的 `_` 。例如字段名 `UID => _uid => uid` `RefreshNow => _refresh_now => refresh_now`
+请求体的设置与查询参数类似，在字段后使用标签 `req:"body"` 将其设置为请求体的键值对。请求体默认以 `JSON` 格式发送。
 
 ```go
-type Upload struct{
-	HTML string `api:"body" req:"html"`
-}
-```
-
-如果你对自动生成的字段名不满意，例如 `HTML => _h_t_m_l => h_t_m_l` ，可以使用 `req` 标签强制使用该名称。
-
-### 参数值怎么来的
-
-字段 `UID` 的类型是 `int` 为什么成功以字符串写入了 `query` 。`RefreshNow` 的类型是 `bool` 为什么成功以字符串写入了 `FormBody` ？
-
-这是因为在 [marshal.go](./marshal.go) 中定义了 `func Marshal(i any) (string, error)` 函数。通过这个函数可以将任意常见类型转换成字符串。此外，对于实现了 `req.Marshaler` `json.Marshaler` 接口的值，也会被转换。最终，在没有任意一个类型匹配成功时，会直接对其进行 `JSON` 序列化得到字符串。
-
-```go
-func Marshal(i any) (string, error) {
-	if i == nil {
-		return "", nil
-	}
-	switch i := i.(type) {
-	case Marshaler:
-		return i.MarshalString()
-	case json.Marshaler:
-		b, err := i.MarshalJSON()
-		return string(b), err
-	case ...:
-		// 省略部分类型 详见文件
-	default:
-		b, err := json.Marshal(i)
-		return string(b), err
-	}
-}
-```
-
-## 拓展
-
-### 参数 `Cookie` 怎么写入
-
-在 [interfaces.go](./interfaces.go) 中定义了 `CookieJar` 接口。直接将实现了此接口的类型嵌入 `API` 中，并且在发起请求前为其赋值，程序会自动读取这个 `CookieJar` 。
-
-```go
-// 可判断有效性的 CookieJar
-type CookieJar interface {
-	IsValid() bool
-	http.CookieJar
-}
-```
-
-### 客户端 `Client`
-
-之前在发送请求时使用了 `req.Do` 函数，实际上这个函数内部调用 `req.DefaultClient` 的 `func (c *Client) Do(api API) (*http.Response, error)` 方法。
-
-```go
-// 发送请求
-func Do(api API) (*http.Response, error) {
-	return DefaultClient.Do(api)
-}
-```
-
-在 [client.go](./client.go) 中定义了客户端 `Client` 的结构体。
-
-```go
-// 客户端
-type Client struct {
-	http.Client
-	BaseURL   *url.URL
-	Header    http.Header
-	Variables map[string]any
-}
-```
-
-其中 `http.Client` 即每次发起请求时使用的客户端。
-
-代码中的 `RetryTimer` 是定义在 [interfaces.go](./interfaces.go) 中用来重试请求的接口。
-
-具体实现参考 [retry.go](./retry.go) 中的 `DoubleTimer` 。直接将该类型嵌入 `API` 结构体即可使用。
-
-```go
-// 发送带上下文的请求
-func (c *Client) DoWithContext(ctx context.Context, api API) (*http.Response, error) {
-	req, err := api.NewRequestWithContext(ctx, c, api)
-	if err != nil {
-		return nil, err
-	}
-	// 这便是上面提到的自动添加 CookieJar 的实现
-	if jar, ok := api.(CookieJar); ok && jar.IsValid() {
-		cli := c.Client
-		cli.Jar = jar
-		resp, err := cli.Do(req)
-		if ticker, ok := api.(RetryTicker); ok {
-			for i := 0; err != nil; i++ {
-				d, ok := ticker.NextRetry(i)
-				if !ok {
-					break
-				}
-				time.Sleep(d)
-				resp, err = cli.Do(req)
-			}
-		}
-		return resp, err
-	}
-	resp, err := c.Client.Do(req)
-	if ticker, ok := api.(RetryTicker); ok {
-		for i := 0; err != nil; i++ {
-			d, ok := ticker.NextRetry(i)
-			if !ok {
-				break
-			}
-			time.Sleep(d)
-			resp, err = c.Client.Do(req)
-		}
-	}
-	return resp, err
-}
-```
-
-其中 `BaseURL` 即每次发起请求时使用基地址，需要使用的 `APICreator` 使用了这个方法。
-
-```go
-// 拼接 BaseURL 和提供的 rawURL
-//
-// 当 rawURL 以 "/" 开头时才会拼接
-func (c *Client) URL(rawURL string) string {
-	if c.BaseURL != nil && strings.HasPrefix(rawURL, "/") {
-		rawURL = c.BaseURL.JoinPath(rawURL).String()
-	}
-	return rawURL
-}
-```
-
-其中 `Header` 即每次发起请求时使用基础请求头，需要使用的 `APICreator` 使用了这个方法。
-
-```go
-// 向 req 请求添加请求头
-//
-// 会使用 Client 中设置的默认请求头
-func (c *Client) AddHeader(req *http.Request, header []Field, val reflect.Value) (err error) {
-	if c.Header != nil {
-		req.Header = c.Header.Clone()
-	}
-	for _, data := range header {
-		req.Header[data.Name] = []string{}  // 覆写基础请求头
-		err = c.AddValue(req.Header, data, val)
-		if err != nil {
-			return
-		}
-	}
-	return
-}
-```
-
-其中 `Variables` 是一个用户可自行添加值的字典，它的用处在下面会介绍。
-
-```go
-// 获取 Variables 中的值
-//
-// 参数 key 必须以 "$" 开头
-func (c *Client) Value(key string) any {
-	if c.Variables == nil {
-		return nil
-	}
-	if strings.HasPrefix(key, "$") {
-		return c.Variables[key]
-	}
-	return nil
+type Post struct {
+	UID            int    `req:"query"`
+	Sign           string `req:"body"`
+	RefreshNow     bool   `req:"body"`
+	AcceptLanguage string `req:"header" default:"zh-CN"`
 }
 
-// 获取 Variables 中的值并转换成字符串
-func (c *Client) ValueString(key string) (string, error) {
-	i := c.Value(key)
-	if i != nil {
-		return Marshal(i)
-	}
-	return key, nil
-}
-```
-
-### 标签 `api` 还能怎么用
-
-其实，标签的完全格式为 `api:(query|body|header|file|files)[:value][,omitempty]`
-
-当标签使用 `file` `files` 时，会对该字段类型进行特殊判断。采用 `file` 时会判断该字段是否实现了 `io.Reader` 接口，采用 `files` 时会判断该字段是否是列表或数组，并且元素的类型实现了 `io.Reader` 接口。本质是用来上传文件的，具体使用方法后面介绍。
-
-标签后面的 `[:value]` `[,omitempty]` 这两个是互斥的，分别代表“当前字段值为空时要使用的默认值”和“当前字段值为空时忽略该字段”。字段判空使用的是 `func (v reflect.Value) IsZero() bool` 方法。
-
-“忽略该字段”很好理解不做多解释，例如 `api:"query,omitempty"`
-
-“默认值”指使用了类似 `api:"query:114"` `api:"body:$secret"` 标签时。如果“默认值”不以 `$` 开头，则会将该字符串直接写入这个参数值中。否则，会在 `Client` 中查找这个名称代表的值，如果没找到则会将带有 `$` 的这个字符串写入参数值。
-
-```go
-if field.IsZero() {
-	if data.Omitempty {
-		return nil
-	}
-	if data.Value != "" {
-		s, err := c.ValueString(data.Value)
-		if err != nil {
-			return err
-		}
-		adder.Add(data.Name, s)
-		return nil
-	}
-}
-```
-
-### 怎么上传文件
-
-在 [writer.go](./writer.go) 中定义了 `FileWriter` 接口。
-
-```go
-// 文件写入器
-type FileWriter interface {
-	Adder
-	io.Closer
-
-	// 初始化函数 可以做一些赋值操作
-	Initial() error
-
-	// 获取最终请求体
-	Reader() io.Reader
-
-	// 请求头 Content-Type
-	FormDataContentType() string
-
-	// 写入一个文件
-	Write(file io.Reader, data Field) error
-}
-```
-
-同时定义了一个具体实现 `DefaultFileWriter` 。
-
-```go
-// 命名的读取器
-type NamedReader interface {
-	io.Reader
-	Name() (filename string)
-}
-
-// 写入文件
-func (w *DefaultFileWriter) Write(file io.Reader, data Field) error {
-	switch file := file.(type) {
-	case NamedReader:
-		return WriteFormFile(w.Writer, filepath.Join(data.Name, file.Name()), file.Name(), file)
-	default:
-		return WriteFormFile(w.Writer, filepath.Join(data.Name, data.Value), data.Value, file)
-	}
-}
-```
-
-可以看到，之前经过判断实现了 `io.Reader` 的字段会被当做 `file io.Reader` 参数传入该方法，然后再写入请求。
-
-```go
-type file struct {
-	name  string
-	value string
-}
-
-func (f file) Name() string {
-	return f.name
-}
-
-func (f file) Read(p []byte) (n int, err error) {
-	return copy(p, []byte(f.value)), io.EOF
-}
-
-var _ req.NamedReader = file{}
-
-type Upload struct {
-	req.PostMultipartForm
-	FileA  file   `api:"file"`
-	FileB  file   `api:"file" req:"file_c"`
-	FilesC []file `api:"files"`
-	FilesD []file `api:"files" req:"upload/files_e"`
-}
-
-func (Upload) RawURL() string {
-	return "https://httpbin.org/post"
-}
-
-var _ req.API = Upload{}
-
-func TestPostMultipartForm(t *testing.T) {
-	var data = Upload{
-		FileA:  file{"a.txt", "hello A!"},
-		FileB:  file{"b.txt", "hello B!"},
-		FilesC: []file{ {"c1.txt", "hello C1!"}, {"c2.txt", "hello C2!"} },
-		FilesD: []file{ {"d1.txt", "hello D1!"}, {"d2.txt", "hello D2!"} },
-	}
-	r, err := cli.JSON(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r2 := r.(map[string]any)
-	for key, value := range r2["files"].(map[string]any) {
-		t.Logf("%v: %v", key, value)
-	}
-}
-```
-
-```
-> go test -v -run ^TestPostMultipartForm$
-=== RUN   TestPostMultipartForm
-    method_test.go:128: upload\files_e\d1.txt: hello D1!
-    method_test.go:128: upload\files_e\d2.txt: hello D2!
-    method_test.go:128: file_a\a.txt: hello A!
-    method_test.go:128: file_c\b.txt: hello B!
-    method_test.go:128: files_c\c1.txt: hello C1!
-    method_test.go:128: files_c\c2.txt: hello C2!
---- PASS: TestPostMultipartForm (1.06s)
-PASS
-ok      github.com/Drelf2018/req/tests  1.299s
-```
-
-### 接口 `APICreator` 到底是个啥
-
-直接从 [method.go](./method.go) 找出我写好了的一个文件上传请求的构造器。
-
-```go
-// 带有文件的请求体的 POST 请求构造器
-type PostMultipartForm struct {
-	FileWriter
-}
-
-func (PostMultipartForm) Method() string {
+func (Post) Method() string {
 	return http.MethodPost
 }
 
-// 实现 APICreator 的方法 NewRequestWithContext 接收一个上下文 context.Context 一个客户端 *Client 以及一个 API 信息接口 APIData
-func (p PostMultipartForm) NewRequestWithContext(ctx context.Context, cli *Client, api APIData) (req *http.Request, err error) {
-	// 根据 API 加载任务
-	task := LoadTask(api)
-	// 获取 API 的值(reflect.Value)以便后续添加参数
-	value := reflect.Indirect(reflect.ValueOf(api))
-	// 判断当前有没有加载任意一种文件写入器
-	if p.FileWriter == nil {
-		// 使用默认的文件写入器 封装后的 *multipart.Writer
-		p.FileWriter = &DefaultFileWriter{}
-	}
-	// 初始化写入器
-	err = p.FileWriter.Initial()
-	if err != nil {
-		return
-	}
-	// 遍历 API 中的 file files 标签的字段
-	var field reflect.Value
-	for _, data := range task.Files {
-		// 找到对应的值
-		field, err = value.FieldByIndexErr(data.Index)
-		if err != nil {
-			return
-		}
-		// 为空直接跳过
-		if field.IsZero() {
-			continue
-		}
-		// 如果是 files 标签就说明有很多文件
-		if field.Kind() == reflect.Slice || field.Kind() == reflect.Array {
-			for i := 0; i < field.Len(); i++ {
-				// 逐一写入文件写入器
-				// 因为这些值在前在已经判断过是否实现 io.Reader 所以可以直接断言
-				err = p.Write(field.Index(i).Interface().(io.Reader), data)
-				if err != nil {
-					return
-				}
-			}
-		} else {
-			// 如果是 file 标签就只写本身
-			err = p.Write(field.Interface().(io.Reader), data)
-			if err != nil {
-				return
-			}
-		}
-	}
-	// 除了文件还要写一些常规的键值对
-	for _, data := range task.Body {
-		err = cli.AddValue(p, data, value)
-		if err != nil {
-			return
-		}
-	}
-	// 关闭写入 等待读取 body
-	err = p.Close()
-	if err != nil {
-		return
-	}
-	// 构建底层请求 *http.Request
-	req, err = cli.AddBody(ctx, api, p.Reader())
-	if err == nil {
-		// 添加常规请求参数
-		err = cli.AddQuery(req, task.Query, value)
-		if err == nil {
-			// 先添加请求头
-			err = cli.AddHeader(req, task.Header, value)
-			// 在对其覆写
-			req.Header.Set("Content-Type", p.FormDataContentType())
-		}
-	}
-	return
+func (Post) RawURL() string {
+	return "https://httpbin.org/post"
 }
 
-var _ APICreator = PostMultipartForm{}
+func TestPost(t *testing.T) {
+	text, err := req.Text(Post{UID: 10086, Sign: "这个人很懒", RefreshNow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
 ```
 
-### 为 `JSON` 格式响应体导出对应的结构体
+在上面代码中，我们定义了一个 `Post` 结构体。在发送请求后，服务端收到了我们的请求体：
 
-在 [client.go](./client.go) 中有 `(*Client).Generate` 方法，它会请求这个 `API` 并将返回结果以 `JSON` 格式解析，如果成功会再将该 `JSON` 转成 `go` 语言的结构体形式，最后追加写入给定文件中。该功能为实验性功能，不多作介绍，如想了解详情请看 [converter.go](./converter.go) 源码。
+```json
+{
+	"refresh_now": true,
+	"sign": "\u8fd9\u4e2a\u4eba\u5f88\u61d2"
+}
+```
+
+同时字段 `AcceptLanguage` 的值自动设置为了请求头 `Accept-Language` 的值。这同样是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成请求头的函数 `HeaderReplacer` 。
 
 ```go
-func TestGenerate(t *testing.T) {
-	req.Generate("req_test.go", User{UID: "114514"})
+// HeaderReplacer 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
+var HeaderReplacer = func(s string) string {
+	// ...
+}
+```
+
+### 为请求添加 `Cookie`
+
+`Cookie` 的设置与请求头类似，在字段后使用标签 `req:"cookie"` 将其设置为 `Cookie` 的键值对，或者让 `API` 实现 `http.CookieJar` 接口。
+
+两者的区别在于请求返回 `Set-Cookie` 响应头字段时只会调用 `http.CookieJar` 接口的 `SetCookies` 方法，不会修改字段形式 `Cookie` 的值。
+
+```go
+type Cookie struct {
+	UID       int    `req:"query"`
+	SessionID string `req:"cookie"`
+	token     string
 }
 
-// AutoGenerate ↓↓↓
-
-type UserResponse struct {
-	Args struct {
-	} `json:"args"`
-	Data  string `json:"data"` // ""
-	Files struct {
-	} `json:"files"`
-	Form struct {
-	} `json:"form"`
-	Headers struct {
-		AcceptEncoding string `json:"Accept-Encoding"` // "gzip"
-		Host           string `json:"Host"`            // "httpbin.org"
-		UserAgent      string `json:"User-Agent"`      // "Mozilla/5.1 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.1.1.1 Safari/537.36 Edg/116.1.1938.54"
-	} `json:"headers"`
-	JSON   any    `json:"json"`
-	Method string `json:"method"` // "GET"
-	Origin string `json:"origin"` // "xxx.xxx.xxx.xxx"
-	URL    string `json:"url"`    // "https://httpbin.org/anything/user/114514"
+func (Cookie) Method() string {
+	return http.MethodGet
 }
 
-func GetUser() (result UserResponse, err error) {
-	err = cli.Result(User{}, &result)
+func (Cookie) RawURL() string {
+	return "https://httpbin.org/get"
+}
+
+func (c *Cookie) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	for _, cookie := range cookies {
+		if cookie.Name == "token" {
+			c.token = cookie.Value
+		}
+	}
+}
+
+func (c *Cookie) Cookies(u *url.URL) []*http.Cookie {
+	return []*http.Cookie{{Name: "token", Value: c.token}}
+}
+
+var _ http.CookieJar = (*Cookie)(nil)
+
+func TestCookie(t *testing.T) {
+	text, err := req.Text(&Cookie{UID: 10086, SessionID: "d926f241-28a4-4be3-8022-7b880b348bfa", token: "c99f18ad"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
+```
+Cookie: session_id=d926f241-28a4-4be3-8022-7b880b348bfa; token=c99f18ad
+```
+
+## 利用 `API` 发送请求
+
+之前在发送请求时使用了 `req.Text` 函数，实际上这个函数的内部调用了 `req.DefaultSession` 的 `Text` 方法。
+
+```go
+// 会话
+type Session struct {
+	http.Client
+
+	// 基础路径，若 API 路径以 "/" 开头则会拼接在此路径后
+	BaseURL *url.URL
+
+	// 默认请求头，会自动为每个请求添加
+	Header http.Header
+
+	// 自定义变量，当字段 api tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
+	Variables map[string]any
+}
+
+var DefaultSession = &Session{
+	Header: http.Header{
+		"User-Agent": {UserAgent},
+	},
+}
+```
+
+这里的 `Session` 结构体是一个会话，提供了设置基础路径、设置默认请求头、设置自定义变量、拼接地址、创建请求、发送请求、请求前钩子、响应后钩子、获取字符串形式响应体、响应体写入文件、解析响应体至对象、解包错误等一系列功能。在 [`req.go`](req.go) 中提供的全局函数，都是调用默认会话的同名方法实现的。
+
+### 自定义变量
+
+在前文介绍标签 `default` 时，提到了它是用来设置默认值。如果要设置的默认值过于复杂、不适合在标签中以字符串形式表示，可以设置一个以 `$` 开头的变量名，并且使用会话的 `Set` 方法设置其值。
+
+```go
+type Variables struct {
+	UID       int    `req:"query"`
+	SessionID string `req:"cookie" default:"$sid"`
+}
+
+func (Variables) Method() string {
+	return http.MethodGet
+}
+
+func (Variables) RawURL() string {
+	return "https://httpbin.org/get"
+}
+
+func TestVariables(t *testing.T) {
+	req.DefaultSession.Set("$sid", "d926f241-28a4-4be3-8022-7b880b348bfa")
+	text, err := req.Text(&Variables{UID: 10086})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
+```
+Cookie: session_id=d926f241-28a4-4be3-8022-7b880b348bfa
+```
+
+如果不想使用全局默认值，可以使用需要传入上下文的函数。在查找默认值时，会优先调用上下文的 `Value` 方法，未找到时才会继续使用全局默认值。
+
+```go
+func TestVariables(t *testing.T) {
+	req.DefaultSession.Set("$sid", "d926f241-28a4-4be3-8022-7b880b348bfa")
+	ctx := context.WithValue(context.Background(), "$sid", "new-session-id")
+	text, err := req.TextWithContext(ctx, &Variables{UID: 10086})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
+```
+Cookie: session_id=new-session-id
+```
+
+### 钩子
+
+在 `API` 实现接口 `BeforeRequest` 后，会在发送请求前调用其方法，通常用于打印日志、修改请求参数、中断请求等。
+
+```go
+// 请求前钩子
+type BeforeRequest interface {
+	BeforeRequest(cli *http.Client, req *http.Request, api API) error
+}
+```
+
+在 `API` 实现接口  `CheckResponse` 后，会在收到响应后调用其方法，通常用于判断**状态码**是否正确，当 `API` 未实现这个接口时，默认判断响应是否为 `200 OK` 。
+
+```go
+// 检验响应
+type CheckResponse interface {
+	CheckResponse(cli *http.Client, resp *http.Response, api API) error
+}
+```
+
+### 解包错误
+
+在 `result` 实现接口 `Unwrap` 后，会在调用 `Result` 方法时，对解析结果进行接口判断，通常用于判断**业务码**是否正确。
+
+```go
+// 可解包出错误的接口返回值
+type Unwrap interface {
+	Unwrap() error
+}
+```
+
+```go
+// Result 将请求结果以 JSON 格式解析进对象，该对象必须是指针
+func (s *Session) Result(api API, result any) (err error) {
+	resp, err := s.Do(api)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	// 反序列化
+	err = json.NewDecoder(resp.Body).Decode(result)
+	if err != nil {
+		return
+	}
+	// 解包错误
+	if i, ok := result.(Unwrap); ok {
+		err = i.Unwrap()
+	}
 	return
 }
 ```
+
+## 高级用法
+
+### 通过 `API` 构造请求
+
+在使用本项目的过程中，你有没有想过，结构体是怎么变成请求的？在 [`method/interfaces.go`](method/interfaces.go) 中定义了五种接口：
+
+```go
+// API 请求体
+type APIBody interface {
+	Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error)
+}
+
+// API 请求参数
+type APIQuery interface {
+	Query(r *http.Request, value reflect.Value, query []reflect.StructField) error
+}
+
+// API 请求头
+type APIHeader interface {
+	Header(r *http.Request, value reflect.Value, header []reflect.StructField) error
+}
+
+// API Cookie
+type APICookie interface {
+	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
+}
+
+// API 自定义标签
+type APICustom interface {
+	Custom(r *http.Request, value reflect.Value, custom map[string][]reflect.StructField) error
+}
+```
+
+你可以通过实现这些接口，来自行构建请求。例如本项目默认 `query` 的实现方法：
+
+```go
+// AddValue 根据提供的 StructField 添加对应的值
+func AddValue(ctx context.Context, val reflect.Value, field reflect.StructField, add func(string, string))
+
+// MakeURLValues 根据提供的 []StructField 制作 url.Values
+func MakeURLValues(ctx context.Context, val reflect.Value, fields []reflect.StructField) url.Values {
+	u := make(url.Values, len(fields))
+	for _, field := range fields {
+		AddValue(ctx, val, field, u.Add)
+	}
+	return u
+}
+
+// AddQuery 向 req 请求添加请求参数
+func AddQuery(req *http.Request, val reflect.Value, query []reflect.StructField) {
+	q := MakeURLValues(req.Context(), val, query)
+	if len(q) != 0 {
+		req.URL.RawQuery = q.Encode()
+	}
+}
+```
+
+上面代码中的全局函数均在 `method` 目录下导出，方便你用来构建自己的请求方式。
+
+这里的 `ctx` 包装了用户传入的上下文，`val` 是传入的 `API` 对象的反射值，`query` 是**修改过的**设置了对应标签的结构体字段。
+
+即传入 `APIBody` 接口的是带有 `req:"body"` 的字段，传入 `APIHeader` 的是带有 `req:"header"` 的字段等，前文提及的可以自定义的标签会传入 `APICustom` 接口。
+
+以下是本项目的 `Form` 请求体的实现方法：
+
+```go
+// 以 Form 表单为请求体的 POST 请求构造器
+type PostForm struct {
+	ContentType string `req:"header" default:"application/x-www-form-urlencoded"`
+}
+
+func (PostForm) Method() string {
+	return http.MethodPost
+}
+
+func (PostForm) Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
+	return strings.NewReader(MakeURLValues(ctx, value, body).Encode()), nil
+}
+
+var _ APIBody = PostForm{}
+```
+
+注意到它还同时实现了 `Method` 方法并且包含一个 `ContentType` 请求头字段，这意味着你可以直接将它嵌入你的 `API` 结构体，本项目将三个已实现的构造器提升到了主目录。
+
+```go
+// req.go
+type (
+	Get      = method.Get
+	PostJSON = method.PostJSON
+	PostForm = method.PostForm
+)
+```
+
+```go
+type Form struct {
+	req.PostForm
+	Age  int    `req:"body"`
+	Name string `req:"body"`
+}
+
+func (Form) RawURL() string {
+	return "https://httpbin.org/post"
+}
+
+func TestForm(t *testing.T) {
+	text, err := req.Text(&Form{Age: 17, Name: "Nana7mi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
+```
+data: age=17&name=Nana7mi
+```
+
+### 重试器
+
+在发送请求失败时，往往需要重复多次，均失败后才认定请求失败。但是我们不会无节制不停歇的重试，有没有好办法能让我们知道要重试几次、多久后重试呢？有的兄弟有的，在 [`interfaces.go`](interfaces.go) 中定义的 `RetryTicker` 接口可以轻松的结局这个问题。
+
+```go
+// 重试计时器
+type RetryTicker interface {
+	// 下次重试前需要等待的时间
+	//
+	// 参数 retried 表示从 0 开始的已重试次数
+	//
+	// 返回值 delay 表示需要等待的时间
+	//
+	// 返回值 ok 表示是否继续重试
+	NextRetry(retried int) (delay time.Duration, ok bool)
+}
+```
+
+在 [`retry.go`](retry.go) 里预设了多种重试器方便使用和参考。
+
+```go
+// 初始重试时间间隔 1 秒 之后每次重试时间间隔翻倍
+//
+// 值表示最大重试次数
+type DoubleTicker int
+
+func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
+	return (1 << retried) * time.Second, retried < int(t)
+}
+```
+
+### 上下文
+
+在 [`value.go`](value.go) 里提供了 `WithMap` `WithValues` 两种可以携带值的上下文包裹函数。
+
+### Cookie 转换器
+
+在 [`cookie/cookie.go`](cookie/cookie.go) 里提供了可以将结构体中 `string` 类型或嵌入的结构体中 `string` 类型的字段转换成对应 `*http.Cookie` 对象的函数。默认以字段名作为 `Cookie` 名，也可以通过 `cookie` 标签来指定或排除某个字段名。
+
+```go
+type UserInfo struct {
+	Name        string
+	Description string `cookie:"Desc"`
+}
+
+type Cookies struct {
+	Token     string
+	SessionID string
+	Temp      string `cookie:"-"`
+	UserInfo
+}
+
+func TestCookies(t *testing.T) {
+	c := Cookies{
+		Token:     "c99f18ad",
+		SessionID: "d926f241-28a4-4be3-8022-7b880b348bfa",
+		Temp:      "temp",
+		UserInfo: UserInfo{
+			Name:        "Nana7mi",
+			Description: "Shark",
+		},
+	}
+	t.Log(cookie.Get(c))
+}
+```
+
+```
+[Name=Nana7mi Desc=Shark Token=c99f18ad SessionID=d926f241-28a4-4be3-8022-7b880b348bfa]
+```
+
+### 可持续化 Cookie 池
+
+在 [`cookie/pool.go`](cookie/pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `Cookie` ，具体怎么用我也没搞清楚，就当留给读者的课后题吧！
