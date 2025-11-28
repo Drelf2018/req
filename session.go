@@ -27,7 +27,7 @@ type Session struct {
 	// 默认请求头，会自动为每个请求添加
 	Header http.Header
 
-	// 自定义变量，当字段 api tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
+	// 自定义变量，当字段标签 default 中的值以 "$" 开头则会尝试在该字典中查找对应值
 	Variables map[string]any
 }
 
