@@ -90,9 +90,28 @@ https://httpbin.org/anything/followers/12306?page_limit=30
 细心的朋友可能发现了，字段 `PageLimit` 的值自动设置在了地址中参数 `page_limit` 之后。这是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成下划线参数名的函数 `NameReplacer` 。你也可以自行替换这个函数变量，实现自己的参数名转换函数。
 
 ```go
-// NameReplacer 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
-var NameReplacer = func(s string) string {
-	// ...
+var NameReplacer = CamelToSnake
+
+// CamelToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
+func CamelToSnake(s string) string {
+	if s == "" {
+		return ""
+	}
+	var result strings.Builder
+	for i, r := range s {
+		if unicode.IsUpper(r) {
+			// 不是第一个字符并且前一个不是大写字母，添加下划线
+			if i > 0 && !unicode.IsUpper(rune(s[i-1])) {
+				result.WriteRune('_')
+			}
+			// 转成小写字母
+			result.WriteRune(unicode.ToLower(r))
+		} else {
+			// 非大写字母直接添加
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }
 ```
 
@@ -162,9 +181,22 @@ func TestPost(t *testing.T) {
 同时字段 `AcceptLanguage` 的值自动设置为了请求头 `Accept-Language` 的值。这同样是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成请求头的函数 `HeaderReplacer` 。
 
 ```go
-// HeaderReplacer 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
-var HeaderReplacer = func(s string) string {
-	// ...
+var HeaderReplacer = CamelToHyphenated
+
+// CamelToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
+func CamelToHyphenated(s string) string {
+	if s == "" {
+		return ""
+	}
+	var result strings.Builder
+	for i, r := range s {
+		// 本身是大写字母，不是第一个字符并且前一个不是大写字母，添加横杠
+		if unicode.IsUpper(r) && i > 0 && !unicode.IsUpper(rune(s[i-1])) {
+			result.WriteRune('-')
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
 }
 ```
 
@@ -231,7 +263,7 @@ type Session struct {
 	// 默认请求头，会自动为每个请求添加
 	Header http.Header
 
-	// 自定义变量，当字段 api tag 中的值以 "$" 开头则会尝试在该字典中查找对应值
+	// 自定义变量，当字段标签 default 中的值以 "$" 开头则会尝试在该字典中查找对应值
 	Variables map[string]any
 }
 
