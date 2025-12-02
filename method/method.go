@@ -2,7 +2,6 @@ package method
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,9 +27,9 @@ func (PostJSON) Method() string {
 	return http.MethodPost
 }
 
-func (PostJSON) Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
+func (PostJSON) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
 	buf := &bytes.Buffer{}
-	err := json.NewEncoder(buf).Encode(MakeJSONMap(ctx, value, body))
+	err := json.NewEncoder(buf).Encode(MakeJSONMap(req.Context(), value, body))
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +48,8 @@ func (PostForm) Method() string {
 	return http.MethodPost
 }
 
-func (PostForm) Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
-	return strings.NewReader(MakeURLValues(ctx, value, body).Encode()), nil
+func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
+	return strings.NewReader(MakeURLValues(req.Context(), value, body).Encode()), nil
 }
 
 var _ APIBody = PostForm{}

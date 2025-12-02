@@ -353,9 +353,14 @@ func (s *Session) Result(api API, result any) (err error) {
 在使用本项目的过程中，你有没有想过，结构体是怎么变成请求的？在 [`method/interfaces.go`](method/interfaces.go) 中定义了五种接口：
 
 ```go
+// API Cookie
+type APICookie interface {
+	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
+}
+
 // API 请求体
 type APIBody interface {
-	Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error)
+	Body(r *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error)
 }
 
 // API 请求参数
@@ -366,11 +371,6 @@ type APIQuery interface {
 // API 请求头
 type APIHeader interface {
 	Header(r *http.Request, value reflect.Value, header []reflect.StructField) error
-}
-
-// API Cookie
-type APICookie interface {
-	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
 }
 
 // API 自定义标签
@@ -421,8 +421,8 @@ func (PostForm) Method() string {
 	return http.MethodPost
 }
 
-func (PostForm) Body(ctx context.Context, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
-	return strings.NewReader(MakeURLValues(ctx, value, body).Encode()), nil
+func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
+	return strings.NewReader(MakeURLValues(req.Context(), value, body).Encode()), nil
 }
 
 var _ APIBody = PostForm{}

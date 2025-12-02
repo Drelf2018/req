@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Drelf2018/req/cookie"
 	"github.com/Drelf2018/req/method"
 )
 
@@ -112,20 +111,51 @@ func (s *Session) URL(rawURL string) string {
 
 // CreateRequest 创建新请求
 func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, value reflect.Value) (req *http.Request, err error) {
+	// 新建请求
+	req, err = http.NewRequestWithContext(ctx, api.Method(), s.URL(api.RawURL()), nil)
+	if err != nil {
+		return
+	}
+	// 设置默认请求头
+	if s.Header != nil {
+		req.Header = s.Header.Clone()
+	}
+	// 获取 Cookie
+	if s.Jar != nil {
+		for _, cookie := range s.Jar.Cookies(req.URL) {
+			req.AddCookie(cookie)
+		}
+	}
+	if jar, ok := api.(http.CookieJar); ok {
+		for _, cookie := range jar.Cookies(req.URL) {
+			req.AddCookie(cookie)
+		}
+	}
+	if cookie, ok := api.(method.APICookie); ok {
+		err = cookie.Cookie(req, value, task.Cookie)
+		if err != nil {
+			return
+		}
+	} else {
+		method.AddCookie(req, value, task.Cookie)
+	}
 	// 获取请求体
 	var r io.Reader
 	if body, ok := api.(method.APIBody); ok {
-		r, err = body.Body(ctx, value, task.Body)
+		r, err = body.Body(req, value, task.Body)
 	} else if api.Method() == http.MethodPost {
-		r, err = method.PostJSON{}.Body(ctx, value, task.Body)
+		r, err = method.PostJSON{}.Body(req, value, task.Body)
 	}
 	if err != nil {
 		return
 	}
-	// 新建请求
-	req, err = http.NewRequestWithContext(ctx, api.Method(), s.URL(api.RawURL()), r)
-	if err != nil {
-		return
+	if rc, ok := r.(io.ReadCloser); ok {
+		req.Body = rc
+	} else if r != nil {
+		req.Body = io.NopCloser(r)
+	}
+	if v, ok := r.(interface{ Len() int }); ok {
+		req.ContentLength = int64(v.Len())
 	}
 	// 设置请求参数
 	if query, ok := api.(method.APIQuery); ok {
@@ -137,9 +167,6 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 		method.AddQuery(req, value, task.Query)
 	}
 	// 设置请求头
-	if s.Header != nil {
-		req.Header = s.Header.Clone()
-	}
 	if header, ok := api.(method.APIHeader); ok {
 		err = header.Header(req, value, task.Header)
 		if err != nil {
@@ -165,6 +192,13 @@ func (s *Session) NewRequest(api API) (req *http.Request, err error) {
 	return s.NewRequestWithContext(context.Background(), api)
 }
 
+// NopCookieJar 是一个不返回 Cookies 的 http.CookieJar ，仅可用于 SetCookies
+type NopCookieJar struct {
+	http.CookieJar
+}
+
+func (NopCookieJar) Cookies(u *url.URL) []*http.Cookie { return nil }
+
 // DoWithContext 发送带上下文的请求
 func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
 	ctx = WithMap(ctx, s.Variables)
@@ -181,11 +215,11 @@ func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Respon
 	clientCopy := s.Client
 	cli := &clientCopy
 	// 设置 CookieJar
-	jars := cookie.NewJars(s.Client.Jar, api)
-	for _, field := range task.Cookie {
-		method.AddValue(ctx, value, field, jars.Add)
+	if jar, ok := api.(http.CookieJar); ok {
+		cli.Jar = NopCookieJar{CookieJar: jar}
+	} else if s.Jar != nil {
+		cli.Jar = NopCookieJar{CookieJar: s.Jar}
 	}
-	cli.Jar = jars
 	// 发送请求
 	if before, ok := api.(BeforeRequest); ok {
 		err = before.BeforeRequest(cli, req, api)

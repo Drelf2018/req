@@ -178,6 +178,14 @@ func MakeURLValues(ctx context.Context, val reflect.Value, fields []reflect.Stru
 	return u
 }
 
+// AddCookie 向 req 请求添加 Cookie
+func AddCookie(req *http.Request, val reflect.Value, cookie []reflect.StructField) {
+	ctx := req.Context()
+	for _, field := range cookie {
+		AddValue(ctx, val, field, func(name, value string) { req.AddCookie(&http.Cookie{Name: name, Value: value}) })
+	}
+}
+
 // AddQuery 向 req 请求添加请求参数
 func AddQuery(req *http.Request, val reflect.Value, query []reflect.StructField) {
 	q := MakeURLValues(req.Context(), val, query)
