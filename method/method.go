@@ -3,7 +3,9 @@ package method
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"reflect"
 	"strings"
@@ -53,3 +55,61 @@ func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.Stru
 }
 
 var _ APIBody = PostForm{}
+
+// 以多部份 Form 表单为请求体的 POST 请求构造器
+type PostMultipartForm struct {
+	ContentType string `req:"header" default:"$ContentType"`
+}
+
+func (PostMultipartForm) Method() string {
+	return http.MethodPost
+}
+
+func (PostMultipartForm) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
+	ctx := req.Context()
+	buf := &bytes.Buffer{}
+	multi := multipart.NewWriter(buf)
+	for _, field := range body {
+		val, err := value.FieldByIndexErr(field.Index)
+		if err != nil {
+			return nil, err
+		}
+		switch v := val.Interface().(type) {
+		case io.Reader:
+			if val.IsZero() {
+				if len(field.Tag) == 0 {
+					continue
+				}
+				return nil, fmt.Errorf("req/method: invalid file \"%s\"", field.Name)
+			}
+			name := field.Name
+			if namer, ok := v.(interface{ Name() (filename string) }); ok {
+				name = namer.Name()
+			}
+			writer, err := multi.CreateFormFile(field.Name, name)
+			if err != nil {
+				return nil, err
+			}
+			_, err = io.Copy(writer, v)
+			if err != nil {
+				return nil, err
+			}
+			if closer, ok := v.(io.Closer); ok {
+				err = closer.Close()
+			}
+			if err != nil {
+				return nil, err
+			}
+		default:
+			AddValue(ctx, value, field, func(key, val string) { multi.WriteField(key, val) })
+		}
+	}
+	err := multi.Close()
+	if err != nil {
+		return nil, err
+	}
+	ctx.(interface{ Set(string, any) }).Set("$ContentType", multi.FormDataContentType())
+	return buf, nil
+}
+
+var _ APIBody = PostMultipartForm{}

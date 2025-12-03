@@ -248,6 +248,38 @@ func TestCookie(t *testing.T) {
 Cookie: session_id=d926f241-28a4-4be3-8022-7b880b348bfa; token=c99f18ad
 ```
 
+### 为请求添加文件
+
+`req.PostMultipartForm` 用于构造包含多部分表单数据的 `POST` 请求。它实现了 `APIBody` 接口和 `Method` 方法，可直接嵌入到自定义的 `API` 结构体中使用。类型为 `io.Reader` 的字段通过 `req:"body"` 标签声明后，会被作为文件内容上传。如果该字段实现了 `Name() string` 方法，会以此作为文件名，否则使用转换后的字段名。
+
+```go
+type Upload struct {
+	req.PostMultipartForm
+
+	Username string   `req:"body"`
+	Avatar   *os.File `req:"body"`
+}
+
+func (Upload) RawURL() string {
+	return "https://httpbin.org/post"
+}
+
+func TestUpload(t *testing.T) {
+	file, err := os.Open("avatar.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := req.Text(Upload{
+		Username: "Nana7mi",
+		Avatar:   file,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(text)
+}
+```
+
 ## 利用 `API` 发送请求
 
 之前在发送请求时使用了 `req.Text` 函数，实际上这个函数的内部调用了 `req.DefaultSession` 的 `Text` 方法。
@@ -460,14 +492,15 @@ func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.Stru
 var _ APIBody = PostForm{}
 ```
 
-注意到它还同时实现了 `Method` 方法并且包含一个 `ContentType` 请求头字段，这意味着你可以直接将它嵌入你的 `API` 结构体，本项目将三个已实现的构造器提升到了主目录。
+注意到它还同时实现了 `Method` 方法并且包含一个 `ContentType` 请求头字段，这意味着你可以直接将它嵌入你的 `API` 结构体，本项目将四个已实现的构造器提升到了主目录。
 
 ```go
 // req.go
 type (
-	Get      = method.Get
-	PostJSON = method.PostJSON
-	PostForm = method.PostForm
+	Get               = method.Get
+	PostJSON          = method.PostJSON
+	PostForm          = method.PostForm
+	PostMultipartForm = method.PostMultipartForm
 )
 ```
 

@@ -192,12 +192,12 @@ func (s *Session) NewRequest(api API) (req *http.Request, err error) {
 	return s.NewRequestWithContext(context.Background(), api)
 }
 
-// NopCookieJar 是一个不返回 Cookies 的 http.CookieJar ，仅可用于 SetCookies
-type NopCookieJar struct {
+// SetOnlyCookieJar 是一个不返回 Cookies 的 http.CookieJar ，仅可用于 SetCookies
+type SetOnlyCookieJar struct {
 	http.CookieJar
 }
 
-func (NopCookieJar) Cookies(u *url.URL) []*http.Cookie { return nil }
+func (SetOnlyCookieJar) Cookies(u *url.URL) []*http.Cookie { return nil }
 
 // DoWithContext 发送带上下文的请求
 func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
@@ -216,9 +216,9 @@ func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Respon
 	cli := &clientCopy
 	// 设置 CookieJar
 	if jar, ok := api.(http.CookieJar); ok {
-		cli.Jar = NopCookieJar{CookieJar: jar}
+		cli.Jar = SetOnlyCookieJar{CookieJar: jar}
 	} else if s.Jar != nil {
-		cli.Jar = NopCookieJar{CookieJar: s.Jar}
+		cli.Jar = SetOnlyCookieJar{CookieJar: s.Jar}
 	}
 	// 发送请求
 	if before, ok := api.(BeforeRequest); ok {

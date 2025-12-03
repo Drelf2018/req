@@ -21,6 +21,11 @@ func (c *mapCtx) Value(key any) any {
 	return nil
 }
 
+// Set 为上下文设置新值
+func (c *mapCtx) Set(key string, value any) {
+	c.m[key] = value
+}
+
 // WithMap 创建一个新上下文，用于存储和获取额外的上下文值
 //
 // parent 为新上下文的父上下文，不能为空
