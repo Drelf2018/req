@@ -109,6 +109,16 @@ func (s *Session) URL(rawURL string) string {
 	return url.String()
 }
 
+// GetCookieJar 从对象中获取可用的 http.CookieJar ，如果仅在结构体中嵌入了字段，但值不可用，仍返回空
+func GetCookieJar(v any, u *url.URL) http.CookieJar {
+	if jar, ok := v.(http.CookieJar); ok {
+		defer func() { recover() }()
+		jar.Cookies(u)
+		return jar
+	}
+	return nil
+}
+
 // CreateRequest 创建新请求
 func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, value reflect.Value) (req *http.Request, err error) {
 	// 新建请求
@@ -126,7 +136,7 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 			req.AddCookie(cookie)
 		}
 	}
-	if jar, ok := api.(http.CookieJar); ok {
+	if jar := GetCookieJar(api, req.URL); jar != nil {
 		for _, cookie := range jar.Cookies(req.URL) {
 			req.AddCookie(cookie)
 		}
@@ -223,7 +233,7 @@ func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Respon
 	clientCopy := s.Client
 	cli := &clientCopy
 	// 设置 CookieJar
-	if jar, ok := api.(http.CookieJar); ok {
+	if jar := GetCookieJar(api, req.URL); jar != nil {
 		cli.Jar = SetOnlyCookieJar{CookieJar: jar}
 	} else if s.Jar != nil {
 		cli.Jar = SetOnlyCookieJar{CookieJar: s.Jar}
