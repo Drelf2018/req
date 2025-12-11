@@ -16,6 +16,11 @@ type APICookie interface {
 	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
 }
 
+// XSRF 请求头
+type APIXSRF interface {
+	XSRF() (xsrfCookieName, xsrfHeaderName string)
+}
+
 // API 请求体
 type APIBody interface {
 	Body(r *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error)

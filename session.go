@@ -139,6 +139,14 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 	} else {
 		method.AddCookie(req, value, task.Cookie)
 	}
+	// 设置 XSRF 请求头
+	if xsrf, ok := api.(method.APIXSRF); ok {
+		xsrfCookieName, xsrfHeaderName := xsrf.XSRF()
+		cookie, err := req.Cookie(xsrfCookieName)
+		if err == nil {
+			req.Header.Set(xsrfHeaderName, cookie.Value)
+		}
+	}
 	// 获取请求体
 	var r io.Reader
 	if body, ok := api.(method.APIBody); ok {
