@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"reflect"
 	"sync"
 	"unsafe"
