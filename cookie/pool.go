@@ -2,172 +2,77 @@ package cookie
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"math/rand"
-	"net/http"
 	"sync"
 	"time"
 )
 
-type State int
-
-const (
-	Unverified State = iota // 未验证
-	Verifying               // 验证中
-	Verified                // 已验证
-	Invalid                 // 已失效
-)
-
-type RefreshableCookieJar interface {
-	http.CookieJar
-
-	// 检测 Cookie 是否失效
-	IsValid(context.Context) bool
-
-	// 刷新 Cookie
-	Refresh(context.Context) error
-}
-
-type Cookies struct {
-	// 具体实例
-	RefreshableCookieJar
-
-	// 当前状态
-	state State
-
-	// 刷新锁
-	m sync.Mutex
-}
-
-func (c *Cookies) State() State {
-	return c.state
-}
-
-// 验证 Cookie
-func (c *Cookies) Verify(ctx context.Context) error {
-	c.m.Lock()
-	defer c.m.Unlock()
-
-	c.state = Verifying
-	if c.IsValid(ctx) {
-		c.state = Verified
-		return nil
-	}
-
-	err := ctx.Err()
-	if err != nil {
-		c.state = Invalid
-		return fmt.Errorf("req/cookie: verify cookie failed: %w", err)
-	}
-
-	err = c.Refresh(ctx)
-	if err != nil {
-		c.state = Invalid
-		return fmt.Errorf("req/cookie: refresh cookie failed: %w", err)
-	}
-
-	c.state = Verified
-	return nil
-}
-
-func (c *Cookies) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.RefreshableCookieJar)
-}
-
-var _ json.Marshaler = (*Cookies)(nil)
-
-func (c *Cookies) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &c.RefreshableCookieJar)
-}
-
-var _ json.Unmarshaler = (*Cookies)(nil)
-
+// Pool 是自动保活的 CookieJar 的池，可以随机取出已验证的 CookieJar 使用
 type Pool struct {
-	// Cookie 失效钩子
-	InvalidCookieHook func(cookie *Cookies, err error)
+	// 检测 Cookie 是否有效的时间间隔
+	Refresh time.Duration
 
-	// Cookie 切片
-	items []*Cookies
+	// 保活过程中出现错误时自动调用
+	OnError func(k *KeepaliveCookieJar, err error)
 
-	// 检测刷新的间隔
-	refresh time.Duration
-
-	// 读写锁
 	rw sync.RWMutex
+
+	ctx context.Context
+
+	cancel context.CancelFunc
+
+	cookies []*KeepaliveCookieJar
 }
 
-// 获取全部 Cookie
-func (p *Pool) All() []*Cookies {
-	p.rw.RLock()
-	defer p.rw.RUnlock()
-	return p.items
-}
-
-// 获取随机 Cookie
-func (p *Pool) Random() *Cookies {
-	p.rw.RLock()
-	defer p.rw.RUnlock()
-	verifiedItems := make([]*Cookies, 0, len(p.items))
-	for _, item := range p.items {
-		if item.state == Verified {
-			verifiedItems = append(verifiedItems, item)
-		}
-	}
-	if len(verifiedItems) == 0 {
-		return nil
-	}
-	return verifiedItems[rand.Intn(len(verifiedItems))]
-}
-
-// 定时验证
-func (p *Pool) Verify(ctx context.Context, item *Cookies, refresh time.Duration) {
-	ticker := time.NewTicker(refresh)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			item.state = Invalid
-			return
-		case <-ticker.C:
-			err := item.Verify(ctx)
-			if err != nil {
-				if p.InvalidCookieHook != nil {
-					p.InvalidCookieHook(item, err)
-				}
-				return
-			}
-		}
-	}
-}
-
-// 添加 CookieJar
-func (p *Pool) AddWithRefresh(jar RefreshableCookieJar, refresh time.Duration) context.CancelFunc {
-	cookie := &Cookies{RefreshableCookieJar: jar}
-	ctx, cancel := context.WithCancel(context.Background())
-	// 开始定时验证
-	go p.Verify(ctx, cookie, refresh)
-	// 保存新 Cookie
+// Add 添加 Cookie
+func (p *Pool) Add(jar RefreshableCookieJar) *KeepaliveCookieJar {
 	p.rw.Lock()
 	defer p.rw.Unlock()
-	// 覆盖失效
-	for idx, item := range p.items {
-		if item.state == Invalid {
-			p.items[idx] = cookie
-			return cancel
+	if p.cancel == nil {
+		p.ctx, p.cancel = context.WithCancel(context.Background())
+	}
+	k := &KeepaliveCookieJar{RefreshableCookieJar: jar, OnError: p.OnError}
+	p.cookies = append(p.cookies, k)
+	go k.Keepalive(p.ctx, p.Refresh)
+	return k
+}
+
+// Random 获取随机 Cookie
+func (p *Pool) Random() *KeepaliveCookieJar {
+	p.rw.RLock()
+	defer p.rw.RUnlock()
+	verified := make([]*KeepaliveCookieJar, 0, len(p.cookies))
+	for _, cookie := range p.cookies {
+		if cookie.State() == StateVerified {
+			verified = append(verified, cookie)
 		}
 	}
-	// 添加新值
-	p.items = append(p.items, cookie)
-	return cancel
+	if len(verified) == 0 {
+		return nil
+	}
+	return verified[rand.Intn(len(verified))]
 }
 
-// 添加 CookieJar
-func (p *Pool) Add(jar RefreshableCookieJar) context.CancelFunc {
-	return p.AddWithRefresh(jar, p.refresh)
+// Get 获取有效下标的 Cookie ，不指定下标时返回所有 Cookie
+func (p *Pool) Get(index ...int) []*KeepaliveCookieJar {
+	p.rw.RLock()
+	defer p.rw.RUnlock()
+	if len(index) == 0 {
+		return p.cookies
+	}
+	cookies := make([]*KeepaliveCookieJar, len(index))
+	for i, idx := range index {
+		if 0 <= idx && idx < len(p.cookies) {
+			cookies[i] = p.cookies[idx]
+		}
+	}
+	return cookies
 }
 
-func NewCookiePool(refresh time.Duration) *Pool {
-	return &Pool{refresh: refresh}
+// Stop 停止所有 Cookie 保活
+func (p *Pool) Stop() {
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -14,32 +15,14 @@ import (
 
 var offsetsCache sync.Map // map[uintptr]map[string]uintptr
 
-func parse(t reflect.Type, parentOffset uintptr, offsets map[string]uintptr) {
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		if field.Type.Kind() == reflect.String {
-			name := field.Tag.Get("cookie")
-			if name == "-" {
-				continue
-			}
-			if name == "" {
-				name = field.Name
-			}
-			offsets[name] = parentOffset + field.Offset
-		} else if field.Type.Kind() == reflect.Struct {
-			parse(field.Type, parentOffset+field.Offset, offsets)
-		}
-	}
-}
-
+// load 获取对象的底层指针和对应的 Cookie 映射表
 func load(v any) (unsafe.Pointer, map[string]uintptr) {
+	// 如果已经生成过映射表，直接返回
 	e := (*method.Emptyface)(unsafe.Pointer(&v))
 	if value, ok := offsetsCache.Load(uintptr(e.Type)); ok {
 		return e.Value, value.(map[string]uintptr)
 	}
+	// 获取对象的类型
 	elem := reflect.TypeOf(v)
 	if elem.Kind() == reflect.Pointer {
 		elem = elem.Elem()
@@ -47,8 +30,31 @@ func load(v any) (unsafe.Pointer, map[string]uintptr) {
 	if elem.Kind() != reflect.Struct {
 		return nil, nil
 	}
+	// 广度优先遍历对象的字段
 	offsets := make(map[string]uintptr)
-	parse(elem, 0, offsets)
+	fields := []reflect.StructField{{Type: elem, Offset: 0}}
+	for i := 0; i < len(fields); i++ {
+		elem := fields[i]
+		numField := elem.Type.NumField()
+		for j := 0; j < numField; j++ {
+			field := elem.Type.Field(j)
+			if !field.IsExported() {
+				continue
+			}
+			// 字符串字段设置了标签则创建映射
+			// 结构体字段添加进遍历切片
+			if field.Type.Kind() == reflect.String {
+				if cookie, ok := field.Tag.Lookup("cookie"); ok {
+					offsets[cookie] = elem.Offset + field.Offset
+				}
+			} else if field.Type.Kind() == reflect.Struct {
+				fields = append(fields, reflect.StructField{
+					Type:   field.Type,
+					Offset: elem.Offset + field.Offset,
+				})
+			}
+		}
+	}
 	offsetsCache.Store(uintptr(e.Type), offsets)
 	return e.Value, offsets
 }
