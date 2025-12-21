@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync/atomic"
 	"time"
 )
@@ -53,6 +54,12 @@ type KeepaliveCookieJar struct {
 	// 保活过程中出现错误时自动调用
 	OnError func(k *KeepaliveCookieJar, err error)
 
+	// 最小验证间隔，当字段值不为零时，本次验证时间距离上次成功验证时间超过该值时，才会执行验证，当字段值为零时，每次都会执行
+	MinVerifyInterval time.Duration
+
+	// 上次验证成功时间
+	lastVerifiedTime time.Time
+
 	// 主动取消保活
 	cancel context.CancelFunc
 
@@ -65,17 +72,43 @@ func (k *KeepaliveCookieJar) State() State {
 	return State(atomic.LoadInt32(&k.state))
 }
 
+// Verify 立即检测 Cookie 是否有效
+func (k *KeepaliveCookieJar) Verify(ctx context.Context) {
+	if k.MinVerifyInterval != 0 && time.Since(k.lastVerifiedTime) <= k.MinVerifyInterval {
+		return
+	}
+	atomic.StoreInt32(&k.state, int32(StateVerifying))
+	state, err := Verify(ctx, k.RefreshableCookieJar)
+	atomic.StoreInt32(&k.state, int32(state))
+	if err != nil {
+		if k.OnError != nil {
+			k.OnError(k, err)
+		} else if v, ok := k.RefreshableCookieJar.(interface{ OnError(error) }); ok {
+			v.OnError(err)
+		}
+	} else {
+		if state == StateVerified {
+			k.lastVerifiedTime = time.Now()
+		}
+	}
+}
+
+// Cookies 设置了最小验证间隔时，每次获取 Cookie 前会进行检测
+func (k *KeepaliveCookieJar) Cookies(u *url.URL) []*http.Cookie {
+	if k.MinVerifyInterval != 0 {
+		k.Verify(context.Background())
+	}
+	return k.RefreshableCookieJar.Cookies(u)
+}
+
 // Keepalive 自动保活 Cookie
-func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duration) {
+func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duration, now bool) {
 	// 可以主动取消
 	ctx, k.cancel = context.WithCancel(ctx)
 	defer k.cancel()
 	// 立即进行一次检测
-	atomic.StoreInt32(&k.state, int32(StateVerifying))
-	state, err := Verify(ctx, k.RefreshableCookieJar)
-	atomic.StoreInt32(&k.state, int32(state))
-	if k.OnError != nil && err != nil {
-		k.OnError(k, err)
+	if now {
+		k.Verify(ctx)
 	}
 	// 每间隔固定时间进行一次检测
 	ticker := time.NewTicker(refresh)
@@ -83,17 +116,16 @@ func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duratio
 	for {
 		select {
 		case <-ctx.Done():
-			if k.OnError != nil && ctx.Err() != nil {
-				k.OnError(k, ctx.Err())
+			if ctx.Err() != nil {
+				if k.OnError != nil {
+					k.OnError(k, ctx.Err())
+				} else if v, ok := k.RefreshableCookieJar.(interface{ OnError(error) }); ok {
+					v.OnError(ctx.Err())
+				}
 			}
 			return
 		case <-ticker.C:
-			atomic.StoreInt32(&k.state, int32(StateVerifying))
-			state, err := Verify(ctx, k.RefreshableCookieJar)
-			atomic.StoreInt32(&k.state, int32(state))
-			if k.OnError != nil && err != nil {
-				k.OnError(k, err)
-			}
+			k.Verify(ctx)
 		}
 	}
 }
@@ -108,7 +140,7 @@ func (k *KeepaliveCookieJar) StopKeepalive() {
 // KeepaliveWithContext 立即开始保活 RefreshableCookieJar
 func KeepaliveWithContext(ctx context.Context, refresh time.Duration, jar RefreshableCookieJar) *KeepaliveCookieJar {
 	k := &KeepaliveCookieJar{RefreshableCookieJar: jar}
-	go k.Keepalive(ctx, refresh)
+	go k.Keepalive(ctx, refresh, true)
 	return k
 }
 

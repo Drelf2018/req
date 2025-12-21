@@ -80,7 +80,7 @@ func (PostMultipartForm) Body(req *http.Request, value reflect.Value, body []ref
 				if len(field.Tag) == 0 {
 					continue
 				}
-				return nil, fmt.Errorf("req/method: invalid file \"%s\"", field.Name)
+				return nil, fmt.Errorf("req/method: invalid file %q", field.Name)
 			}
 			name := field.Name
 			if namer, ok := v.(interface{ Name() (filename string) }); ok {

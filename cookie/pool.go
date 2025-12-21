@@ -33,7 +33,7 @@ func (p *Pool) Add(jar RefreshableCookieJar) *KeepaliveCookieJar {
 	}
 	k := &KeepaliveCookieJar{RefreshableCookieJar: jar, OnError: p.OnError}
 	p.cookies = append(p.cookies, k)
-	go k.Keepalive(p.ctx, p.Refresh)
+	go k.Keepalive(p.ctx, p.Refresh, true)
 	return k
 }
 
