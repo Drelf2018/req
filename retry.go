@@ -61,7 +61,20 @@ func (t *FibonacciTicker) NextRetry(retried int) (time.Duration, bool) {
 	}
 }
 
-// 重试传输器
+// RandomTicker 随机计时器，返回给入重试间隔之间的随机值
+type RandomTicker [2]time.Duration
+
+func (r RandomTicker) NextRetry(retried int) (delay time.Duration, ok bool) {
+	if r[0] > r[1] {
+		return time.Duration(rand.Int63n(int64(r[0]-r[1])) + int64(r[1])), true
+	} else if r[0] < r[1] {
+		return time.Duration(rand.Int63n(int64(r[1]-r[0])) + int64(r[0])), true
+	} else {
+		return r[0], true
+	}
+}
+
+// RetryTransport 重试传输器
 type RetryTransport struct {
 	http.RoundTripper
 	RetryTicker
