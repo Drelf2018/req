@@ -43,4 +43,4 @@ func TestCookies(t *testing.T) {
 
 ## 可持续化 Cookie 池
 
-在 [`pool.go`](pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `http.CookieJar` ，具体怎么用我也没搞清楚，就当留给读者的课后题吧！
+在 [`pool.go`](pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `http.CookieJar` ，具体怎么用我也还没搞清楚，就当留给读者的课后题吧！
