@@ -561,4 +561,6 @@ func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
 
 在 [`value.go`](value.go) 里提供了 `WithMap` `WithValues` 两种可以携带值的上下文包裹函数。
 
+### 请求池
 
+在 [`pool.go`](pool.go) 里提供了 `Pool` 用于管理请求，它是零值可用的。
