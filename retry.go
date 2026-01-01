@@ -3,13 +3,12 @@ package req
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"net/http"
 	"time"
 )
 
-// 初始重试时间间隔 1 秒 之后每次重试时间间隔翻倍
-//
-// 值表示最大重试次数
+// DoubleTicker 倍增计时器，初始重试间隔 1 秒，之后每次重试间隔翻倍，值为最大重试次数
 type DoubleTicker int
 
 func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
@@ -19,9 +18,10 @@ func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
 // “试”不过三
 var DefaultRetryTicker RetryTicker = DoubleTicker(2)
 
+// ErrDuration 重试间隔时间非正
 var ErrDuration = errors.New("req: time.Duration of ForeverTicker must be positive")
 
-// 永久重试器
+// ForeverTicker 永久计时器，每次都返回当前值的重试间隔
 type ForeverTicker time.Duration
 
 func (t ForeverTicker) NextRetry(int) (time.Duration, bool) {
@@ -33,24 +33,22 @@ func (t ForeverTicker) NextRetry(int) (time.Duration, bool) {
 
 var _ RetryTicker = (*ForeverTicker)(nil)
 
+// zeroTicker 零间隔计时器
 type zeroTicker int
 
 func (t zeroTicker) NextRetry(retried int) (time.Duration, bool) {
 	return 0, retried < int(t)
 }
 
-// 零间隔重试器
-//
-// 你应该知道自己在做什么、为什么这么做、为什么能这样做
+// ZeroTicker 零间隔重试器，你应该知道自己在做什么、为什么这么做、为什么能这样做
 //
 //	var _ RetryTicker = ZeroTicker(2, "trust me!")
 func ZeroTicker(maxRetries int, whySafe string) RetryTicker {
 	return zeroTicker(maxRetries)
 }
 
-// 斐波那契重试器
-//
-// 前两项为第一次、第二次重试间隔时间，之后按照斐波那契规则返回新间隔时间，第三项为最大单次重试间隔时间
+// FibonacciTicker 斐波那契计时器，前两项为第一次、第二次重试间隔时间
+// 之后按照斐波那契规则返回新间隔时间，重试间隔时间超过第三项时终止
 type FibonacciTicker [3]time.Duration
 
 func (t *FibonacciTicker) NextRetry(retried int) (time.Duration, bool) {

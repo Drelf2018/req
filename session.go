@@ -318,7 +318,7 @@ func (s *Session) Write(api API, name string, perm os.FileMode) error {
 	return os.WriteFile(name, p, perm)
 }
 
-// ResultWithContext 将带上下文的请求结果以 JSON 格式解析进对象，该对象必须是指针
+// ResultWithContext 将带上下文的请求结果以 JSON 格式反序列化进对象，该对象必须是指针
 func (s *Session) ResultWithContext(ctx context.Context, api API, result any) (err error) {
 	resp, err := s.DoWithContext(ctx, api)
 	if err != nil {
@@ -337,7 +337,7 @@ func (s *Session) ResultWithContext(ctx context.Context, api API, result any) (e
 	return
 }
 
-// Result 将请求结果以 JSON 格式解析进对象，该对象必须是指针
+// Result 将请求结果以 JSON 格式反序列化进对象，该对象必须是指针
 func (s *Session) Result(api API, result any) (err error) {
 	resp, err := s.Do(api)
 	if err != nil {
@@ -356,13 +356,13 @@ func (s *Session) Result(api API, result any) (err error) {
 	return
 }
 
-// JSONWithContext 将带上下文的请求结果以 JSON 格式解析进接口
+// JSONWithContext 将带上下文的请求结果以 JSON 格式反序列化进接口
 func (s *Session) JSONWithContext(ctx context.Context, api API) (data any, err error) {
 	err = s.ResultWithContext(ctx, api, &data)
 	return
 }
 
-// JSON 将请求结果以 JSON 格式解析进接口
+// JSON 将请求结果以 JSON 格式反序列化进接口
 func (s *Session) JSON(api API) (data any, err error) {
 	err = s.Result(api, &data)
 	return

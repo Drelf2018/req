@@ -306,7 +306,7 @@ var DefaultSession = &Session{
 }
 ```
 
-这里的 `Session` 结构体是一个会话，提供了设置基础路径、设置默认请求头、设置自定义变量、拼接地址、创建请求、发送请求、请求前钩子、响应后钩子、获取字符串形式响应体、响应体写入文件、解析响应体至对象、解包错误等一系列功能。在 [`req.go`](req.go) 中提供的全局函数，都是调用默认会话的同名方法实现的。
+这里的 `Session` 结构体是一个会话，提供了设置基础路径、设置默认请求头、设置自定义变量、拼接地址、创建请求、发送请求、请求前钩子、响应后钩子、获取字符串形式响应体、响应体写入文件、反序列化响应体至对象、解包错误等一系列功能。在 [`req.go`](req.go) 中提供的全局函数，都是调用默认会话的同名方法实现的。
 
 ### 自定义变量
 
@@ -380,7 +380,7 @@ type CheckResponse interface {
 
 ### 解包错误
 
-在 `result` 实现接口 `Unwrap` 后，会在调用 `Result` 方法时，对解析结果进行接口判断，通常用于判断**业务码**是否正确。
+在 `result` 实现接口 `Unwrap` 后，会在调用 `Result` 方法时，对反序列化结果进行接口判断，通常用于判断**业务码**是否正确。
 
 ```go
 // 可解包出错误的接口返回值
@@ -390,7 +390,7 @@ type Unwrap interface {
 ```
 
 ```go
-// Result 将请求结果以 JSON 格式解析进对象，该对象必须是指针
+// Result 将请求结果以 JSON 格式反序列化进对象，该对象必须是指针
 func (s *Session) Result(api API, result any) (err error) {
 	resp, err := s.Do(api)
 	if err != nil {
@@ -549,9 +549,7 @@ type RetryTicker interface {
 在 [`retry.go`](retry.go) 里预设了多种重试器方便使用和参考。
 
 ```go
-// 初始重试时间间隔 1 秒 之后每次重试时间间隔翻倍
-//
-// 值表示最大重试次数
+// DoubleTicker 倍增计时器，初始重试间隔 1 秒，之后每次重试间隔翻倍，值为最大重试次数
 type DoubleTicker int
 
 func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
@@ -563,41 +561,4 @@ func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
 
 在 [`value.go`](value.go) 里提供了 `WithMap` `WithValues` 两种可以携带值的上下文包裹函数。
 
-### Cookie 转换器
 
-在 [`cookie/cookie.go`](cookie/cookie.go) 里提供了可以将结构体中 `string` 类型或嵌入的结构体中 `string` 类型的字段转换成对应 `*http.Cookie` 对象的函数。默认以字段名作为 `Cookie` 名，也可以通过 `cookie` 标签来指定或排除某个字段名。
-
-```go
-type UserInfo struct {
-	Name        string
-	Description string `cookie:"Desc"`
-}
-
-type Cookies struct {
-	Token     string
-	SessionID string
-	Temp      string `cookie:"-"`
-	UserInfo
-}
-
-func TestCookies(t *testing.T) {
-	c := Cookies{
-		Token:     "c99f18ad",
-		SessionID: "d926f241-28a4-4be3-8022-7b880b348bfa",
-		Temp:      "temp",
-		UserInfo: UserInfo{
-			Name:        "Nana7mi",
-			Description: "Shark",
-		},
-	}
-	t.Log(cookie.Get(c))
-}
-```
-
-```
-[Name=Nana7mi Desc=Shark Token=c99f18ad SessionID=d926f241-28a4-4be3-8022-7b880b348bfa]
-```
-
-### 可持续化 Cookie 池
-
-在 [`cookie/pool.go`](cookie/pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `Cookie` ，具体怎么用我也没搞清楚，就当留给读者的课后题吧！

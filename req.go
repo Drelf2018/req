@@ -63,24 +63,24 @@ func Write(api API, name string, perm os.FileMode) error {
 	return DefaultSession.Write(api, name, perm)
 }
 
-// 将带上下文的请求结果以 JSON 格式解析进对象
+// 将带上下文的请求结果以 JSON 格式反序列化进对象
 func ResultWithContext[T any](ctx context.Context, api API) (result T, err error) {
 	err = DefaultSession.ResultWithContext(ctx, api, &result)
 	return
 }
 
-// 将请求结果以 JSON 格式解析进对象
+// 将请求结果以 JSON 格式反序列化进对象
 func Result[T any](api API) (result T, err error) {
 	err = DefaultSession.Result(api, &result)
 	return
 }
 
-// 将带上下文的请求结果以 JSON 格式解析进接口
+// 将带上下文的请求结果以 JSON 格式反序列化进接口
 func JSONWithContext(ctx context.Context, api API) (any, error) {
 	return DefaultSession.JSONWithContext(ctx, api)
 }
 
-// 将请求结果以 JSON 格式解析进接口
+// 将请求结果以 JSON 格式反序列化进接口
 func JSON(api API) (any, error) {
 	return DefaultSession.JSON(api)
 }
