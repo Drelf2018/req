@@ -29,18 +29,14 @@ type Refresher interface {
 	Refresh(context.Context, http.CookieJar) error
 }
 
-// AlwaysInvalidRefresher 始终失效刷新器，每次检测时都进行一次刷新
-type AlwaysInvalidRefresher func(context.Context, http.CookieJar) error
+// ForcedRefresher 强制刷新器，每次检测时都认定 http.CookieJar 已失效，并将自身用于刷新
+type ForcedRefresher func(context.Context, http.CookieJar) error
 
-func (a AlwaysInvalidRefresher) IsValid(context.Context, http.CookieJar) (bool, error) {
-	return false, nil
-}
+func (f ForcedRefresher) IsValid(context.Context, http.CookieJar) (bool, error) { return false, nil }
 
-func (a AlwaysInvalidRefresher) Refresh(ctx context.Context, jar http.CookieJar) error {
-	return a(ctx, jar)
-}
+func (f ForcedRefresher) Refresh(ctx context.Context, jar http.CookieJar) error { return f(ctx, jar) }
 
-var _ Refresher = (*AlwaysInvalidRefresher)(nil)
+var _ Refresher = (*ForcedRefresher)(nil)
 
 // Verify 检测 http.CookieJar 是否有效，如果已经失效会进行一次刷新
 func Verify(ctx context.Context, refresher Refresher, jar http.CookieJar) (State, error) {
@@ -87,17 +83,14 @@ func (k *KeepaliveCookieJar) SinceLastVerified() time.Duration {
 }
 
 // Verify 立即检测 http.CookieJar 是否有效
-func (k *KeepaliveCookieJar) Verify(ctx context.Context) {
+func (k *KeepaliveCookieJar) Verify(ctx context.Context) error {
 	atomic.StoreInt32(&k.state, int32(StateVerifying))
 	state, err := Verify(ctx, k.Refresher, k.CookieJar)
 	atomic.StoreInt32(&k.state, int32(state))
-	if err != nil {
-		if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
-			v.OnError(err)
-		}
-	} else if state == StateVerified {
+	if err == nil && state == StateVerified {
 		k.lastVerifiedTime = time.Now()
 	}
+	return err
 }
 
 // Keepalive 自动保活 http.CookieJar
@@ -122,7 +115,10 @@ func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duratio
 			}
 			return
 		case <-ticker.C:
-			k.Verify(ctx)
+			err := k.Verify(ctx)
+			if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
+				v.OnError(err)
+			}
 		}
 	}
 }
@@ -135,15 +131,15 @@ func (k *KeepaliveCookieJar) StopKeepalive() {
 }
 
 // KeepaliveWithContext 携带上下文立即开始保活 http.CookieJar
-func KeepaliveWithContext(ctx context.Context, refresh time.Duration, refresher Refresher, jar http.CookieJar) *KeepaliveCookieJar {
+func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, refresh time.Duration) *KeepaliveCookieJar {
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
 	go k.Keepalive(ctx, refresh, true)
 	return k
 }
 
 // Keepalive 立即开始保活 http.CookieJar
-func Keepalive(refresh time.Duration, refresher Refresher, jar http.CookieJar) *KeepaliveCookieJar {
-	return KeepaliveWithContext(context.Background(), refresh, refresher, jar)
+func Keepalive(jar http.CookieJar, refresher Refresher, refresh time.Duration) *KeepaliveCookieJar {
+	return KeepaliveWithContext(context.Background(), jar, refresher, refresh)
 }
 
 // Pool 是自动保活的 http.CookieJar 的池，可以获取随机已验证的实例
@@ -161,7 +157,7 @@ type Pool struct {
 }
 
 // Add 添加 http.CookieJar 并且立即开始保活
-func (p *Pool) Add(refresher Refresher, jar http.CookieJar) *KeepaliveCookieJar {
+func (p *Pool) Add(jar http.CookieJar, refresher Refresher) *KeepaliveCookieJar {
 	p.rw.Lock()
 	defer p.rw.Unlock()
 	if p.cancel == nil {
