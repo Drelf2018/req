@@ -1,12 +1,23 @@
 package req
 
 import (
-	"context"
 	"errors"
 	"math/rand"
-	"net/http"
 	"time"
 )
+
+// RetryTicker 重试计时器
+type RetryTicker interface {
+	// NextRetry 用于计算下次重试前需要等待的时间，入参为已重试次数，返回值为等待时间以及是否继续重试
+	NextRetry(retried int) (delay time.Duration, ok bool)
+}
+
+// RetryFunc 重试函数
+type RetryFunc func(retried int) (delay time.Duration, ok bool)
+
+func (r RetryFunc) NextRetry(retried int) (delay time.Duration, ok bool) { return r(retried) }
+
+var _ RetryTicker = (*RetryFunc)(nil)
 
 // DoubleTicker 倍增计时器，初始重试间隔 1 秒，之后每次重试间隔翻倍，值为最大重试次数
 type DoubleTicker int
@@ -74,68 +85,57 @@ func (r RandomTicker) NextRetry(retried int) (delay time.Duration, ok bool) {
 	}
 }
 
-// RetryTransport 重试传输器
-type RetryTransport struct {
-	http.RoundTripper
-	RetryTicker
+// Ticker 到达重试计时器返回的下次重试时间时，会发送当前时间到通道，当计时器不再重试时，会关闭通道
+type Ticker struct {
+	C    <-chan time.Time
+	stop chan struct{}
 }
 
-func (t *RetryTransport) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	resp, err = t.RoundTripper.RoundTrip(r)
-	for i := 0; err != nil; i++ {
-		d, ok := t.NextRetry(i)
+// Stop 停止定时器
+func (t *Ticker) Stop() {
+	close(t.stop)
+}
+
+func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
+	defer close(out)      // 保证用户端正常退出
+	var timer *time.Timer // 内部定时器，用来产生信号
+	for retried := 0; ; retried++ {
+		// 循环获取延迟时间
+		delay, ok := retry.NextRetry(retried)
 		if !ok {
-			break
+			return
 		}
-		time.Sleep(d)
-		resp, err = t.RoundTripper.RoundTrip(r)
-	}
-	return
-}
-
-var _ http.RoundTripper = (*RetryTransport)(nil)
-
-func NewRetryTransport(ticker RetryTicker) *RetryTransport {
-	return &RetryTransport{http.DefaultTransport, ticker}
-}
-
-// WithRetry 可以将重试器转换成一个定时返回当前重试次数的通道
-//
-//	func TestRetry(t *testing.T) {
-//		resp, err := GetStatus()
-//		if err != nil {
-//			c, cancel := req.WithRetry(req.DefaultRetryTicker)
-//			for range c {
-//				resp, err = GetStatus()
-//				if err == nil {
-//					cancel()
-//				}
-//			}
-//		}
-//		t.Log(resp.Status)
-//	}
-func WithRetry(r RetryTicker) (<-chan int, context.CancelFunc) {
-	c := make(chan int)
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		timer := time.NewTimer(time.Hour)
-		for i := 0; ; i++ {
-			if d, ok := r.NextRetry(i); ok {
-				timer.Reset(d)
-			} else {
-				timer.Stop()
-				close(c)
-				return
-			}
+		if timer == nil {
+			// 初始化定时器
+			timer = time.NewTimer(delay)
+		} else {
+			// 排空现有通道，再重置定时器
 			select {
-			case <-ctx.Done():
-				timer.Stop()
-				close(c)
-				return
 			case <-timer.C:
-				c <- i
+			default:
 			}
+			timer.Reset(delay)
 		}
-	}()
-	return c, cancel
+		// 监听定时器或停止通道触发
+		select {
+		case t := <-timer.C:
+			// 将定时器触发时间非阻塞转发给用户
+			select {
+			case out <- t:
+			default:
+			}
+		case <-t.stop:
+			// 用户主动关闭
+			timer.Stop()
+			return
+		}
+	}
+}
+
+// NewTicker 创建并立即启动 Ticker
+func NewTicker(retry RetryTicker) *Ticker {
+	c := make(chan time.Time, 1) // 转发通道，不能将内部定时器的通道直接导出
+	t := &Ticker{C: c, stop: make(chan struct{})}
+	go t.run(retry, c)
+	return t
 }
