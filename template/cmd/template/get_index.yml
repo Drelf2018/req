@@ -1,0 +1,14 @@
+desc: 获取微博用户已发布博文
+env:
+  page: 1
+  index: 0
+steps:
+- method: GET
+  url: https://weibo.com/ajax/statuses/mymblog?uid={{ env "uid" }}&page={{ env "page" }}&feature=0
+  cookie: $env.cookie
+  header:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+    Referer: "https://weibo.com/"
+    X-Requested-With: "XMLHttpRequest"
+  output:
+    $env.blog: 'index (env "text" | gjson "data.list.#(isTop==~false)#") (env "index")'

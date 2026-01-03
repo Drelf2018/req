@@ -1,0 +1,13 @@
+desc: 获取 DeepSeek 回复
+env:
+  model: reasoner
+  system: null
+steps:
+- method: POST
+  url: http://serverless.nana7mi.link/api/assistant/deepseek_{{ env "model" }}
+  body:
+    key: $env.key
+    input: $env.input
+    system: '{{ if env "system" }}{{ env "system" }}{{ end }}'
+  output:
+    reply: '{{ if (eq (env "text" | gjson "code") 0.0) }}{{ env "text" | gjson "msg" }}{{ end }}'
