@@ -15,6 +15,7 @@ type task struct {
 	response *http.Response
 	content  []byte
 	err      error
+	ctx      context.Context
 	wg       sync.WaitGroup
 }
 
@@ -98,7 +99,7 @@ func (p *Pool) RunWithContext(ctx context.Context) {
 				case <-p.ctx.Done():
 					return
 				case task := <-p.processor:
-					timeout, cancel := context.WithTimeout(p.ctx, p.Timeout)
+					timeout, cancel := context.WithTimeout(task.ctx, p.Timeout)
 					task.response, task.err = p.Session.DoWithContext(timeout, task.API)
 					if task.err == nil {
 						task.content, task.err = io.ReadAll(task.response.Body)
@@ -115,15 +116,21 @@ func (p *Pool) RunWithContext(ctx context.Context) {
 // ErrPoolClosed 请求池已经关闭
 var ErrPoolClosed = errors.New("req: pool has been closed")
 
-// NewTask 用请求创建任务
-func (p *Pool) NewTask(api API) *task {
+// NewTaskWithContext 携带上下文用请求创建任务
+func (p *Pool) NewTaskWithContext(ctx context.Context, api API) *task {
+	task := &task{API: api, ctx: ctx}
 	if p.cancel == nil {
-		return &task{err: ErrPoolClosed}
+		task.err = ErrPoolClosed
+		return task
 	}
-	task := &task{API: api}
 	task.wg.Add(1)
 	p.processor <- task
 	return task
+}
+
+// NewTask 用请求创建任务
+func (p *Pool) NewTask(api API) *task {
+	return p.NewTaskWithContext(context.Background(), api)
 }
 
 // Shutdown 关闭请求池，会等待所有已发送的请求，并且为未发送的请求设置错误
