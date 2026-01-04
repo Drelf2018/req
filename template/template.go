@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -55,26 +56,36 @@ func (t *Template) Do(ctx context.Context, env *OrderedMap, tmpl *template.Templ
 	if t.Env == nil {
 		t.Env = &OrderedMap{}
 	}
-	// 创建子步骤的错误集
+	// 检查是否传入所有必要参数
 	var tmplErr TemplateError
+	t.Env.Iterate(func(key string, value any) bool {
+		if value == nil {
+			tmplErr.Add(fmt.Sprintf("env[%q]", key), ErrKeyNotFound)
+		}
+		return true
+	})
+	if tmplErr.Len() != 0 {
+		return &tmplErr
+	}
+	// 执行子步骤
 	for idx := range t.Steps {
 		step := &t.Steps[idx]
 		// 创建子模板避免环境变量跨域
-		stepTmpl := tmpl.New(fmt.Sprintf("#%d %s", idx, step.StepName()))
+		stepTmpl := tmpl.New(fmt.Sprintf("steps[%d] %s", idx, step.StepName()))
 		// 初始化子步骤环境变量
 		if step.Template.Env == nil {
 			step.Template.Env = &OrderedMap{}
 		}
 		err := Range(stepTmpl, data, step.Template.Env.Clone(), step.Template.Env, step.Template.Env, t.Env, env)
 		if err != nil {
-			step.Template.Env.Set("ERROR", err)
+			step.Template.Env.Set("[ERROR]", err)
 			tmplErr.Add(stepTmpl.Name(), (*TemplateError)(step.Template.Env))
 			continue
 		}
 		// 执行子步骤
 		err = step.Do(ctx, env, stepTmpl, data)
 		if err != nil {
-			step.Template.Env.Set("ERROR", err)
+			step.Template.Env.Set("[ERROR]", err)
 			tmplErr.Add(stepTmpl.Name(), (*TemplateError)(step.Template.Env))
 		}
 	}
@@ -85,6 +96,7 @@ func (t *Template) Do(ctx context.Context, env *OrderedMap, tmpl *template.Templ
 type Step struct {
 	Template   `yaml:",inline"`
 	TemplateID uint64         `json:"-"       yaml:"-"`                             // 模板外键
+	If         string         `json:"if"      yaml:"if"`                            // 是否使用
 	Uses       string         `json:"uses"    yaml:"uses"`                          // 使用模板
 	Method     string         `json:"method"  yaml:"method"`                        // 请求方法
 	URL        string         `json:"url"     yaml:"url"`                           // 请求地址
@@ -132,18 +144,18 @@ func (s Step) Request(ctx context.Context, env *OrderedMap, tmpl *template.Templ
 		return
 	}
 	// 将步骤运行结果输出到全局环境变量
-	if s.Template.Output == nil || s.Template.Output.Len() == 0 {
-		return
+	if s.Template.Output != nil && s.Template.Output.Len() != 0 {
+		// 将响应体写进环境变量
+		result := &OrderedMap{}
+		result.Set("content", r)
+		result.Set("text", string(r))
+		// 尝试反序列化 JSON
+		var i any
+		result.Set("error", json.Unmarshal(r, &i))
+		result.Set("json", i)
+		err = Range(tmpl, data, s.Template.Output, env, result, s.Template.Env, env)
 	}
-	// 请求成功，将响应体写进环境变量
-	result := &OrderedMap{}
-	result.Set("content", r)
-	result.Set("text", string(r))
-	// 尝试反序列化 JSON
-	var i any
-	result.Set("error", json.Unmarshal(r, &i))
-	result.Set("json", i)
-	return Range(tmpl, data, s.Template.Output, env, result, s.Template.Env, env)
+	return
 }
 
 // Load 用步骤加载子模板
@@ -152,6 +164,9 @@ func (s Step) Load(ctx context.Context, env *OrderedMap, tmpl *template.Template
 	loadedTmpl, err := Load(s.Uses)
 	if err != nil {
 		return
+	}
+	if loadedTmpl.Env == nil {
+		loadedTmpl.Env = &OrderedMap{}
 	}
 	// 用步骤变量覆盖子模板变量
 	err = Range(tmpl, data, s.Template.Env, loadedTmpl.Env, env)
@@ -165,14 +180,24 @@ func (s Step) Load(ctx context.Context, env *OrderedMap, tmpl *template.Template
 		return
 	}
 	// 将子模板运行结果输出到全局环境变量
-	if s.Template.Output == nil || s.Template.Output.Len() == 0 {
-		return
+	if s.Template.Output != nil && s.Template.Output.Len() != 0 {
+		err = Range(tmpl, data, s.Template.Output, env, loadedEnv)
 	}
-	return Range(tmpl, data, s.Template.Output, env, loadedEnv)
+	return
 }
 
 // Do 执行步骤，如果步骤有 URL 则发送请求，如果有 Uses 则加载并执行子模板，否则视为起始模板
 func (s Step) Do(ctx context.Context, env *OrderedMap, tmpl *template.Template, data any) (err error) {
+	// 判断是否跳过该步
+	if s.If != "" {
+		s.If, err = ToString(tmpl, s.If, data, s.Template.Env, env)
+		if err != nil {
+			return
+		}
+		if stay, err := strconv.ParseBool(s.If); err != nil || !stay {
+			return err
+		}
+	}
 	if s.URL != "" {
 		err = s.Request(ctx, env, tmpl, data)
 	} else if s.Uses != "" {

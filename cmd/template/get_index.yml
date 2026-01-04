@@ -1,5 +1,7 @@
 desc: 获取微博用户已发布博文
 env:
+  uid: null
+  cookie: null
   page: 1
   index: 0
 steps:
@@ -11,4 +13,4 @@ steps:
     Referer: "https://weibo.com/"
     X-Requested-With: "XMLHttpRequest"
   output:
-    $env.blog: 'index (env "text" | gjson "data.list.#(isTop==~false)#") (env "index")'
+    $set.blog: 'index (env "text" | gjson "data.list.#(isTop==~false)#") (env "index")'

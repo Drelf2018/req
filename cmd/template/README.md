@@ -5,7 +5,7 @@
 ### 怎么用
 
 ```
-> go install github.com/Drelf2018/req/template/cmd/template@latest
+> go install github.com/Drelf2018/req/cmd/template@latest
 > template automatic_comment.yml --uid="" --key="" --weibo=""
 ```
 

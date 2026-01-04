@@ -14,7 +14,18 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// EnvPrefix 环境变量简写前缀
+// SetPrefix 设置变量前缀
+var SetPrefix string = "$set."
+
+// TrimSetPrefix 修剪设置变量前缀
+func TrimSetPrefix(s string) (string, bool) {
+	if t := strings.TrimSpace(s); strings.HasPrefix(t, SetPrefix) {
+		return strings.TrimPrefix(t, SetPrefix), true
+	}
+	return s, false
+}
+
+// EnvPrefix 环境变量前缀
 var EnvPrefix string = "$env."
 
 // TrimEnvPrefix 修剪环境变量前缀
@@ -63,23 +74,34 @@ func ToString(tmpl *template.Template, text string, data any, getter ...*Ordered
 
 // Bind 在模板上绑定环境变量函数
 func Bind(tmpl *template.Template, setter *OrderedMap, getter ...*OrderedMap) {
-	tmpl.Funcs(template.FuncMap{"env": func(key string, value ...any) (any, error) {
-		switch len(value) {
-		case 0:
-			return Getter.Get(getter, key)
-		case 1:
-			setter.Set(key, value[0])
-			return "", nil
-		default:
-			return nil, fmt.Errorf("too many arguments: expected 1 or 2, got: %d", 1+len(value))
-		}
-	}})
+	tmpl.Funcs(template.FuncMap{
+		"set": func(key string, value any) string {
+			setter.Set(key, value)
+			return ""
+		},
+		"env": func(key string, value ...any) (any, error) {
+			switch len(value) {
+			case 0:
+				return Getter.Get(getter, key)
+			case 1:
+				if v, err := Getter.Get(getter, key); err == nil {
+					return v, nil
+				}
+				return value[0], nil
+			default:
+				return nil, fmt.Errorf("too many arguments: expected 1 or 2, got: %d", 1+len(value))
+			}
+		},
+	})
 }
 
 // Range 遍历更新模板
 func Range(tmpl *template.Template, data any, ranger, setter *OrderedMap, getter ...*OrderedMap) error {
-	var tmplErr TemplateError
 	Bind(tmpl, setter, getter...)
+	if ranger == nil {
+		return nil
+	}
+	var tmplErr TemplateError
 	ranger.Iterate(func(key string, value any) bool {
 		v, ok := value.(string)
 		// 不是字符串，不需要进一步解析，直接设置值
@@ -98,8 +120,8 @@ func Range(tmpl *template.Template, data any, ranger, setter *OrderedMap, getter
 			return true
 		}
 		// 键有前缀，需要将值嵌套在环境变量设置模板中，因为模板本身有设置值的功能，直接解析即可
-		if s, ok := TrimEnvPrefix(key); ok {
-			_, err := ToString(tmpl, fmt.Sprintf(`{{ env "%s" (%s) }}`, s, v), data)
+		if s, ok := TrimSetPrefix(key); ok {
+			_, err := ToString(tmpl, fmt.Sprintf(`{{ set "%s" (%s) }}`, s, v), data)
 			if err != nil {
 				tmplErr.Add(key, err)
 			}
@@ -155,12 +177,6 @@ var BuiltinFuncMap = template.FuncMap{
 			return r.Value(), nil
 		}
 		return nil, fmt.Errorf("path not found: %q", path)
-	},
-	"default": func(def, val any) any {
-		if val != nil {
-			return val
-		}
-		return def
 	},
 	"base64encode": func(s string) string {
 		return base64.StdEncoding.EncodeToString([]byte(s))

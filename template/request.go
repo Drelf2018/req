@@ -3,7 +3,6 @@ package template
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,8 +69,6 @@ func (r *Request) RawURL() string {
 
 var _ req.API = (*Request)(nil)
 
-var ErrBlankCookie = errors.New("req/template: blank cookie")
-
 func (r *Request) Cookie(req *http.Request, _ reflect.Value, _ []reflect.StructField) (err error) {
 	if r.Step.Cookie == nil {
 		return
@@ -86,9 +83,13 @@ func (r *Request) Cookie(req *http.Request, _ reflect.Value, _ []reflect.StructF
 	}
 	switch cookie := r.Step.Cookie.(type) {
 	case string:
+		cookie, err = ToString(r.Tmpl, cookie, r.Data)
+		if err != nil {
+			return
+		}
 		parts := strings.Split(textproto.TrimString(cookie), ";")
 		if len(parts) == 1 && parts[0] == "" {
-			return ErrBlankCookie
+			return
 		}
 		for _, pair := range parts {
 			pair = textproto.TrimString(pair)

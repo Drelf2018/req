@@ -3,6 +3,7 @@ package template
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -364,6 +365,8 @@ var _ yaml.Marshaler = (*OrderedMap)(nil)
 // Getter 按顺序从有序映射中查找键值
 type Getter []*OrderedMap
 
+var ErrKeyNotFound = errors.New("key not found")
+
 // Get 返回第一个找到键的有序映射中的值，如果都没有会返回错误
 func (g Getter) Get(key string) (any, error) {
 	for _, m := range g {
@@ -372,7 +375,7 @@ func (g Getter) Get(key string) (any, error) {
 			return v, nil
 		}
 	}
-	return nil, fmt.Errorf("key not found: %q", key)
+	return nil, fmt.Errorf("%w: %q", ErrKeyNotFound, key)
 }
 
 // TemplateError 模板错误

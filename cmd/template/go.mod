@@ -1,12 +1,15 @@
-module github.com/Drelf2018/req/template/cmd/template
+module github.com/Drelf2018/req/cmd/template
 
-go 1.23.4
+go 1.18
 
-replace github.com/Drelf2018/req => ../../..
+replace github.com/Drelf2018/req => ../..
 
-replace github.com/Drelf2018/req/template => ../..
+replace github.com/Drelf2018/req/template => ../../template
 
-require github.com/Drelf2018/req/template v0.0.0
+require (
+	github.com/Drelf2018/req/template v0.0.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/Drelf2018/req v0.0.0 // indirect
@@ -19,6 +22,5 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	golang.org/x/net v0.29.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.30.0 // indirect
 )
