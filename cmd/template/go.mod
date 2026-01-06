@@ -2,17 +2,13 @@ module github.com/Drelf2018/req/cmd/template
 
 go 1.18
 
-replace github.com/Drelf2018/req => ../..
-
-replace github.com/Drelf2018/req/template => ../../template
-
 require (
-	github.com/Drelf2018/req/template v0.0.0
+	github.com/Drelf2018/req/template v0.0.0-20260106142635-eca335984836
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/Drelf2018/req v0.0.0 // indirect
+	github.com/Drelf2018/req v0.0.0-20260104161816-8b4932400e5d // indirect
 	github.com/PuerkitoBio/goquery v1.9.3 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
