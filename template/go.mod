@@ -2,10 +2,8 @@ module github.com/Drelf2018/req/template
 
 go 1.18
 
-replace github.com/Drelf2018/req => ../
-
 require (
-	github.com/Drelf2018/req v0.0.0
+	github.com/Drelf2018/req v0.0.0-20260104161816-8b4932400e5d
 	github.com/PuerkitoBio/goquery v1.9.3
 	github.com/tidwall/gjson v1.18.0
 	gopkg.in/yaml.v3 v3.0.1
