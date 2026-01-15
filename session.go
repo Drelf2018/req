@@ -30,6 +30,15 @@ type Session struct {
 	Variables map[string]any
 }
 
+// MustParseURL 强制解析路径
+func MustParseURL(rawURL string) *url.URL {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
 var ErrInvalidKeyPrefix = errors.New("req: key must start with '$'")
 
 // Set 设置自定义变量的值
