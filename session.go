@@ -255,13 +255,16 @@ func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Respon
 		}
 	}
 	resp, err = cli.Do(req)
+	if err != nil {
+		return
+	}
 	// 检验响应
-	if err == nil {
-		if checker, ok := api.(CheckResponse); ok {
-			err = checker.CheckResponse(cli, resp, api)
-		} else if resp.StatusCode != http.StatusOK {
-			err = fmt.Errorf("req: status code not ok: %s", resp.Status)
-		}
+	if checker, ok := api.(CheckResponse); ok {
+		err = checker.CheckResponse(cli, resp, api)
+	} else if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		err = fmt.Errorf("req: failed to request: %s (%s)", body, resp.Status)
 	}
 	return
 }
