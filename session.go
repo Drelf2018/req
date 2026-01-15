@@ -172,6 +172,7 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 		r, err = body.Body(req, value, task.Body)
 	} else if api.Method() == http.MethodPost {
 		r, err = method.PostJSON{}.Body(req, value, task.Body)
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if err != nil {
 		return
