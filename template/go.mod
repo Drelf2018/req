@@ -3,7 +3,7 @@ module github.com/Drelf2018/req/template
 go 1.18
 
 require (
-	github.com/Drelf2018/req v0.0.0-20260115125047-49f13c0bbdb3
+	github.com/Drelf2018/req v0.0.0-20260115180133-996b67f064fd
 	github.com/PuerkitoBio/goquery v1.9.3
 	github.com/tidwall/gjson v1.18.0
 	gopkg.in/yaml.v3 v3.0.1

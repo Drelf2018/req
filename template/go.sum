@@ -1,5 +1,5 @@
-github.com/Drelf2018/req v0.0.0-20260115125047-49f13c0bbdb3 h1:JdIPYscz1iTvUnplH0K3F3o0p+Lkej1hYBDjqQKGMoo=
-github.com/Drelf2018/req v0.0.0-20260115125047-49f13c0bbdb3/go.mod h1:SgQkhv/iD3+Sqvg9KCqiElH7jaXMl4OWGBKHd6MJoCE=
+github.com/Drelf2018/req v0.0.0-20260115180133-996b67f064fd h1:j54EZNMCvU0bB01Z7ouIjkHkAm0qBc7V9NRdU+2aJ6Y=
+github.com/Drelf2018/req v0.0.0-20260115180133-996b67f064fd/go.mod h1:SgQkhv/iD3+Sqvg9KCqiElH7jaXMl4OWGBKHd6MJoCE=
 github.com/PuerkitoBio/goquery v1.9.3 h1:mpJr/ikUA9/GNJB/DBZcGeFDXUtosHRyRrwh7KGdTG0=
 github.com/PuerkitoBio/goquery v1.9.3/go.mod h1:1ndLHPdTz+DyQPICCWYlYQMPl0oXZj0G6D4LCYA6u4U=
 github.com/andybalholm/cascadia v1.3.2 h1:3Xi6Dw5lHF15JtdcmAHD3i1+T8plmv7BQ/nsViSLyss=
