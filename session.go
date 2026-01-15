@@ -16,7 +16,7 @@ import (
 	"github.com/Drelf2018/req/method"
 )
 
-// 会话
+// Session 会话
 type Session struct {
 	http.Client
 
@@ -39,6 +39,7 @@ func MustParseURL(rawURL string) *url.URL {
 	return u
 }
 
+// ErrInvalidKeyPrefix 无效的自定义变量名
 var ErrInvalidKeyPrefix = errors.New("req: key must start with '$'")
 
 // Set 设置自定义变量的值
@@ -97,7 +98,6 @@ func (s *Session) UserAgent() string {
 func (s *Session) URL(rawURL string) string {
 	if s.BaseURL == nil || !strings.HasPrefix(rawURL, "/") {
 		return rawURL
-
 	}
 	var p string
 	prefix := s.BaseURL.EscapedPath()
@@ -210,7 +210,7 @@ func (s *Session) CreateRequest(ctx context.Context, api API, task method.Task, 
 	return
 }
 
-// NewRequestWithContext 新建带上下文的请求
+// NewRequestWithContext 携带上下文新建请求
 func (s *Session) NewRequestWithContext(ctx context.Context, api API) (req *http.Request, err error) {
 	return s.CreateRequest(WithMap(ctx, s.Variables), api, method.LoadTask(api), reflect.Indirect(reflect.ValueOf(api)))
 }
@@ -227,7 +227,7 @@ type SetOnlyCookieJar struct {
 
 func (SetOnlyCookieJar) Cookies(u *url.URL) []*http.Cookie { return nil }
 
-// DoWithContext 发送带上下文的请求
+// DoWithContext 携带上下文发送请求
 func (s *Session) DoWithContext(ctx context.Context, api API) (resp *http.Response, err error) {
 	ctx = WithMap(ctx, s.Variables)
 	// 提取 API 中字段
@@ -275,7 +275,7 @@ func (s *Session) Do(api API) (*http.Response, error) {
 	return s.DoWithContext(context.Background(), api)
 }
 
-// ContentWithContext 获取带上下文的请求结果
+// ContentWithContext 携带上下文获取请求结果
 func (s *Session) ContentWithContext(ctx context.Context, api API) ([]byte, error) {
 	resp, err := s.DoWithContext(ctx, api)
 	if err != nil {
@@ -295,7 +295,7 @@ func (s *Session) Content(api API) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// TextWithContext 获取带上下文的请求结果字符串
+// TextWithContext 携带上下文获取请求结果字符串
 func (s *Session) TextWithContext(ctx context.Context, api API) (string, error) {
 	p, err := s.ContentWithContext(ctx, api)
 	if err != nil {
@@ -313,7 +313,7 @@ func (s *Session) Text(api API) (string, error) {
 	return string(p), nil
 }
 
-// WriteWithContext 将带上下文的请求结果写入文件
+// WriteWithContext 携带上下文将请求结果写入文件
 func (s *Session) WriteWithContext(ctx context.Context, api API, name string, perm os.FileMode) error {
 	p, err := s.ContentWithContext(ctx, api)
 	if err != nil {
@@ -331,7 +331,7 @@ func (s *Session) Write(api API, name string, perm os.FileMode) error {
 	return os.WriteFile(name, p, perm)
 }
 
-// ResultWithContext 将带上下文的请求结果以 JSON 格式反序列化进对象，该对象必须是指针
+// ResultWithContext 携带上下文将请求结果以 JSON 格式反序列化进对象，该对象必须是指针
 func (s *Session) ResultWithContext(ctx context.Context, api API, result any) (err error) {
 	resp, err := s.DoWithContext(ctx, api)
 	if err != nil {
@@ -369,7 +369,7 @@ func (s *Session) Result(api API, result any) (err error) {
 	return
 }
 
-// JSONWithContext 将带上下文的请求结果以 JSON 格式反序列化进接口
+// JSONWithContext 携带上下文将请求结果以 JSON 格式反序列化进接口
 func (s *Session) JSONWithContext(ctx context.Context, api API) (data any, err error) {
 	err = s.ResultWithContext(ctx, api, &data)
 	return

@@ -285,7 +285,7 @@ func TestUpload(t *testing.T) {
 之前在发送请求时使用了 `req.Text` 函数，实际上这个函数的内部调用了 `req.DefaultSession` 的 `Text` 方法。
 
 ```go
-// 会话
+// Session 会话
 type Session struct {
 	http.Client
 
@@ -363,7 +363,7 @@ Cookie: session_id=new-session-id
 在 `API` 实现接口 `BeforeRequest` 后，会在发送请求前调用其方法，通常用于打印日志、修改请求参数、中断请求等。
 
 ```go
-// 请求前钩子
+// BeforeRequest 请求前钩子
 type BeforeRequest interface {
 	BeforeRequest(cli *http.Client, req *http.Request, api API) error
 }
@@ -372,7 +372,7 @@ type BeforeRequest interface {
 在 `API` 实现接口  `CheckResponse` 后，会在收到响应后调用其方法，通常用于判断**状态码**是否正确，当 `API` 未实现这个接口时，默认判断响应是否为 `200 OK` 。
 
 ```go
-// 检验响应
+// CheckResponse 检验响应，出现错误时必须自行调用 resp.Body.Close()
 type CheckResponse interface {
 	CheckResponse(cli *http.Client, resp *http.Response, api API) error
 }
@@ -383,7 +383,7 @@ type CheckResponse interface {
 在 `result` 实现接口 `Unwrap` 后，会在调用 `Result` 方法时，对反序列化结果进行接口判断，通常用于判断**业务码**是否正确。
 
 ```go
-// 可解包出错误的接口返回值
+// Unwrap 用于从响应体中解包出错误
 type Unwrap interface {
 	Unwrap() error
 }

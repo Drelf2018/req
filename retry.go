@@ -26,7 +26,7 @@ func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
 	return (1 << retried) * time.Second, retried < int(t)
 }
 
-// “试”不过三
+// DefaultRetryTicker 默认计时器，“试”不过三
 var DefaultRetryTicker RetryTicker = DoubleTicker(2)
 
 // ErrDuration 重试间隔时间非正

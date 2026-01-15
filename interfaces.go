@@ -12,17 +12,17 @@ type API interface {
 	RawURL() string
 }
 
-// 请求前钩子
+// BeforeRequest 请求前钩子
 type BeforeRequest interface {
 	BeforeRequest(cli *http.Client, req *http.Request, api API) error
 }
 
-// 检验响应
+// CheckResponse 检验响应，出现错误时必须自行调用 resp.Body.Close()
 type CheckResponse interface {
 	CheckResponse(cli *http.Client, resp *http.Response, api API) error
 }
 
-// 可解包出错误的接口返回值
+// Unwrap 用于从响应体中解包出错误
 type Unwrap interface {
 	Unwrap() error
 }
