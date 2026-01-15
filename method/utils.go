@@ -1,9 +1,11 @@
 package method
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -133,6 +135,17 @@ func AddValue(ctx context.Context, val reflect.Value, field reflect.StructField,
 	default:
 		add(field.Name, Marshal(val.Interface()))
 	}
+}
+
+// NewJSONReader 将提供的值序列化后存入 *bytes.Buffer
+func NewJSONReader(v any) (io.Reader, error) {
+	buf := &bytes.Buffer{}
+	err := json.NewEncoder(buf).Encode(v)
+	if err != nil {
+		return nil, err
+	}
+	buf.Truncate(buf.Len() - 1) // Seeing the source code of (*json.Encoder).Encode
+	return buf, nil
 }
 
 // MakeJSONMap 根据提供的 []StructField 制作 map[string]any

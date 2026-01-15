@@ -2,7 +2,6 @@ package method
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -30,13 +29,7 @@ func (PostJSON) Method() string {
 }
 
 func (PostJSON) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
-	buf := &bytes.Buffer{}
-	err := json.NewEncoder(buf).Encode(MakeJSONMap(req.Context(), value, body))
-	if err != nil {
-		return nil, err
-	}
-	buf.Truncate(buf.Len() - 1) // Seeing the source code of (*json.Encoder).Encode
-	return buf, nil
+	return NewJSONReader(MakeJSONMap(req.Context(), value, body))
 }
 
 var _ APIBody = PostJSON{}
