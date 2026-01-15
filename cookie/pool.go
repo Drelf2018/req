@@ -94,13 +94,31 @@ func (k *KeepaliveCookieJar) Verify(ctx context.Context) error {
 }
 
 // Keepalive 自动保活 http.CookieJar
-func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duration, now bool) {
+func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duration, delay ...time.Duration) {
 	// 可以主动取消
 	ctx, k.cancel = context.WithCancel(ctx)
 	defer k.cancel()
-	// 立即进行一次检测
-	if now {
-		k.Verify(ctx)
+	// 获取错误处理函数
+	var onError func(error)
+	if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
+		onError = v.OnError
+	}
+	// 延时结束后进行一次检测
+	var totalDelay time.Duration
+	for _, d := range delay {
+		totalDelay += d
+	}
+	select {
+	case <-ctx.Done():
+		if ctx.Err() != nil && onError != nil {
+			onError(ctx.Err())
+		}
+		return
+	case <-time.After(totalDelay):
+		err := k.Verify(ctx)
+		if err != nil && onError != nil {
+			onError(err)
+		}
 	}
 	// 每间隔固定时间进行一次检测
 	ticker := time.NewTicker(refresh)
@@ -108,16 +126,14 @@ func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duratio
 	for {
 		select {
 		case <-ctx.Done():
-			if ctx.Err() != nil {
-				if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
-					v.OnError(ctx.Err())
-				}
+			if ctx.Err() != nil && onError != nil {
+				onError(ctx.Err())
 			}
 			return
 		case <-ticker.C:
 			err := k.Verify(ctx)
-			if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
-				v.OnError(err)
+			if err != nil && onError != nil {
+				onError(err)
 			}
 		}
 	}
@@ -133,7 +149,7 @@ func (k *KeepaliveCookieJar) StopKeepalive() {
 // KeepaliveWithContext 携带上下文立即开始保活 http.CookieJar
 func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, refresh time.Duration) *KeepaliveCookieJar {
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
-	go k.Keepalive(ctx, refresh, true)
+	go k.Keepalive(ctx, refresh)
 	return k
 }
 
@@ -165,7 +181,7 @@ func (p *Pool) Add(jar http.CookieJar, refresher Refresher) *KeepaliveCookieJar 
 	}
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
 	p.cookies = append(p.cookies, k)
-	go k.Keepalive(p.ctx, p.Refresh, true)
+	go k.Keepalive(p.ctx, p.Refresh)
 	return k
 }
 
