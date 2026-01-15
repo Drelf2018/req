@@ -30,6 +30,24 @@ type Session struct {
 	Variables map[string]any
 }
 
+// Clone 克隆一个会话
+func (s *Session) Clone() *Session {
+	m := make(map[string]any, len(s.Variables))
+	for k, v := range s.Variables {
+		m[k] = v
+	}
+	session := &Session{
+		Client:    s.Client,
+		Header:    s.Header.Clone(),
+		Variables: m,
+	}
+	if s.BaseURL != nil {
+		baseURL := *s.BaseURL
+		session.BaseURL = &baseURL
+	}
+	return session
+}
+
 // MustParseURL 强制解析路径
 func MustParseURL(rawURL string) *url.URL {
 	u, err := url.Parse(rawURL)
@@ -37,6 +55,20 @@ func MustParseURL(rawURL string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// SetBaseURL 设置基础路径
+func (s *Session) SetBaseURL(rawURL string) *Session {
+	s.BaseURL = MustParseURL(rawURL)
+	return s
+}
+
+// SetHeader 设置默认请求头
+func (s *Session) SetHeader(m map[string]string) *Session {
+	for k, v := range m {
+		s.Header.Set(k, v)
+	}
+	return s
 }
 
 // ErrInvalidKeyPrefix 无效的自定义变量名
