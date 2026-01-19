@@ -85,20 +85,21 @@ func (r RandomTicker) NextRetry(retried int) (delay time.Duration, ok bool) {
 	}
 }
 
-// Ticker 到达重试计时器返回的下次重试时间时，会发送当前时间到通道，当计时器不再重试时，会关闭通道
+// Ticker 到达重试计时器返回的下次重试时间时，会发送当前时间到通道。当计时器不再重试时，会自动关闭通道
 type Ticker struct {
 	C    <-chan time.Time
 	stop chan struct{}
 }
 
-// Stop 停止定时器
+// Stop 手动停止重试计时器
 func (t *Ticker) Stop() {
 	close(t.stop)
 }
 
 func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
-	defer close(out)      // 保证用户端正常退出
-	var timer *time.Timer // 内部定时器，用来产生信号
+	defer close(out)
+	// 内部定时器，用来产生信号
+	var timer *time.Timer
 	for retried := 0; ; retried++ {
 		// 循环获取延迟时间
 		delay, ok := retry.NextRetry(retried)
@@ -124,6 +125,7 @@ func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
 			case out <- t:
 			default:
 			}
+			timer.Stop()
 		case <-t.stop:
 			// 用户主动关闭
 			timer.Stop()
