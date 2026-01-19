@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Drelf2018/req"
 )
 
 // State 是 http.CookieJar 的验证状态
@@ -42,14 +44,14 @@ var _ Refresher = (*ForcedRefresher)(nil)
 func Verify(ctx context.Context, refresher Refresher, jar http.CookieJar) (State, error) {
 	valid, err := refresher.IsValid(ctx, jar)
 	if err != nil {
-		return StateUnverified, fmt.Errorf("req/cookie.Verify: verify failed: %w", err)
+		return StateUnverified, fmt.Errorf("req/cookie: failed to verify: %w", err)
 	}
 	if valid {
 		return StateVerified, nil
 	}
 	err = refresher.Refresh(ctx, jar)
 	if err != nil {
-		return StateInvalid, fmt.Errorf("req/cookie.Verify: refresh failed: %w", err)
+		return StateInvalid, fmt.Errorf("req/cookie: failed to refresh: %w", err)
 	}
 	return StateVerified, nil
 }
@@ -62,8 +64,11 @@ type KeepaliveCookieJar struct {
 	// 刷新器
 	Refresher Refresher
 
+	// 错误上报
+	OnError func(error)
+
 	// 上次验证成功的时间
-	lastVerifiedTime time.Time
+	lastVerified time.Time
 
 	// 主动取消保活
 	cancel context.CancelFunc
@@ -79,62 +84,66 @@ func (k *KeepaliveCookieJar) State() State {
 
 // SinceLastVerified 获取距离上次验证成功时过去的时间
 func (k *KeepaliveCookieJar) SinceLastVerified() time.Duration {
-	return time.Since(k.lastVerifiedTime)
+	return time.Since(k.lastVerified)
 }
 
-// Verify 立即检测 http.CookieJar 是否有效
-func (k *KeepaliveCookieJar) Verify(ctx context.Context) error {
+// Verify 携带上下文检测 http.CookieJar 是否有效
+func (k *KeepaliveCookieJar) Verify(ctx context.Context) {
 	atomic.StoreInt32(&k.state, int32(StateVerifying))
 	state, err := Verify(ctx, k.Refresher, k.CookieJar)
 	atomic.StoreInt32(&k.state, int32(state))
-	if err == nil && state == StateVerified {
-		k.lastVerifiedTime = time.Now()
+	if err != nil {
+		if k.OnError != nil {
+			k.OnError(err)
+		}
+	} else if state == StateVerified {
+		k.lastVerified = time.Now()
 	}
-	return err
 }
 
-// Keepalive 自动保活 http.CookieJar
-func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, refresh time.Duration, delay ...time.Duration) {
+// Run 检测 http.CookieJar 是否有效
+func (k *KeepaliveCookieJar) Run() {
+	k.Verify(context.Background())
+}
+
+// Keepalive 自动保活 http.CookieJar ，延时结束后进行一次检测，如果不传入则立即执行一次检测，传入非正数则不预先检测
+func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, retry req.RetryTicker, delay ...time.Duration) {
 	// 可以主动取消
 	ctx, k.cancel = context.WithCancel(ctx)
 	defer k.cancel()
-	// 获取错误处理函数
-	var onError func(error)
-	if v, ok := k.CookieJar.(interface{ OnError(error) }); ok {
-		onError = v.OnError
-	}
-	// 延时结束后进行一次检测
+	// 延时结束后进行一次检测，如果不传入则立即执行一次检测
 	var totalDelay time.Duration
 	for _, d := range delay {
 		totalDelay += d
 	}
-	select {
-	case <-ctx.Done():
-		if ctx.Err() != nil && onError != nil {
-			onError(ctx.Err())
+	if totalDelay > 0 {
+		timer := time.NewTimer(totalDelay)
+		select {
+		case <-ctx.Done():
+			if ctx.Err() != nil && k.OnError != nil {
+				k.OnError(ctx.Err())
+			}
+			timer.Stop()
+			return
+		case <-timer.C:
+			k.Verify(ctx)
+			timer.Stop()
 		}
-		return
-	case <-time.After(totalDelay):
-		err := k.Verify(ctx)
-		if err != nil && onError != nil {
-			onError(err)
-		}
+	} else if totalDelay == 0 {
+		k.Verify(ctx)
 	}
-	// 每间隔固定时间进行一次检测
-	ticker := time.NewTicker(refresh)
-	defer ticker.Stop()
+	// 每当重试器触发时进行一次检测
+	ticker := req.NewTicker(retry)
 	for {
 		select {
 		case <-ctx.Done():
-			if ctx.Err() != nil && onError != nil {
-				onError(ctx.Err())
+			if ctx.Err() != nil && k.OnError != nil {
+				k.OnError(ctx.Err())
 			}
+			ticker.Stop()
 			return
 		case <-ticker.C:
-			err := k.Verify(ctx)
-			if err != nil && onError != nil {
-				onError(err)
-			}
+			k.Verify(ctx)
 		}
 	}
 }
@@ -147,21 +156,24 @@ func (k *KeepaliveCookieJar) StopKeepalive() {
 }
 
 // KeepaliveWithContext 携带上下文立即开始保活 http.CookieJar
-func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, refresh time.Duration) *KeepaliveCookieJar {
+func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, retry req.RetryTicker, delay ...time.Duration) *KeepaliveCookieJar {
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
-	go k.Keepalive(ctx, refresh)
+	go k.Keepalive(ctx, retry, delay...)
 	return k
 }
 
 // Keepalive 立即开始保活 http.CookieJar
-func Keepalive(jar http.CookieJar, refresher Refresher, refresh time.Duration) *KeepaliveCookieJar {
-	return KeepaliveWithContext(context.Background(), jar, refresher, refresh)
+func Keepalive(jar http.CookieJar, refresher Refresher, retry req.RetryTicker, delay ...time.Duration) *KeepaliveCookieJar {
+	return KeepaliveWithContext(context.Background(), jar, refresher, retry, delay...)
 }
 
 // Pool 是自动保活的 http.CookieJar 的池，可以获取随机已验证的实例
 type Pool struct {
 	// 检测 http.CookieJar 是否有效的时间间隔
 	Refresh time.Duration
+
+	// 错误上报
+	OnError func(error)
 
 	rw sync.RWMutex
 
@@ -172,16 +184,16 @@ type Pool struct {
 	cookies []*KeepaliveCookieJar
 }
 
-// Add 添加 http.CookieJar 并且立即开始保活
-func (p *Pool) Add(jar http.CookieJar, refresher Refresher) *KeepaliveCookieJar {
+// Add 添加 http.CookieJar 并且开始保活
+func (p *Pool) Add(jar http.CookieJar, refresher Refresher, delay ...time.Duration) *KeepaliveCookieJar {
 	p.rw.Lock()
 	defer p.rw.Unlock()
 	if p.cancel == nil {
 		p.ctx, p.cancel = context.WithCancel(context.Background())
 	}
-	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
+	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher, OnError: p.OnError}
 	p.cookies = append(p.cookies, k)
-	go k.Keepalive(p.ctx, p.Refresh)
+	go k.Keepalive(p.ctx, req.ForeverTicker(p.Refresh), delay...)
 	return k
 }
 
