@@ -1,9 +1,7 @@
 package req
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"os"
 
@@ -16,27 +14,6 @@ type (
 	PostForm          = method.PostForm
 	PostMultipartForm = method.PostMultipartForm
 )
-
-// NamedReader 命名读取器
-type NamedReader struct {
-	name   string
-	reader *bytes.Reader
-}
-
-func (n *NamedReader) Name() string {
-	return n.name
-}
-
-func (n *NamedReader) Read(p []byte) (int, error) {
-	return n.reader.Read(p)
-}
-
-var _ io.Reader = (*NamedReader)(nil)
-
-// NewNamedReader 新建命名读取器
-func NewNamedReader(name string, data []byte) *NamedReader {
-	return &NamedReader{name, bytes.NewReader(data)}
-}
 
 // UserAgent 默认 UA 请求头
 const UserAgent string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 Edg/116.0.1938.54"

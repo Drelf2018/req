@@ -49,6 +49,27 @@ func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.Stru
 
 var _ APIBody = PostForm{}
 
+// NamedReader 命名读取器
+type NamedReader struct {
+	name   string
+	reader *bytes.Reader
+}
+
+func (n *NamedReader) Name() string {
+	return n.name
+}
+
+func (n *NamedReader) Read(p []byte) (int, error) {
+	return n.reader.Read(p)
+}
+
+var _ io.Reader = (*NamedReader)(nil)
+
+// NewNamedReader 新建命名读取器
+func NewNamedReader(name string, data []byte) *NamedReader {
+	return &NamedReader{name, bytes.NewReader(data)}
+}
+
 // 以多部份 Form 表单为请求体的 POST 请求构造器
 type PostMultipartForm struct {
 	ContentType string `req:"header" default:"$ContentType"`
