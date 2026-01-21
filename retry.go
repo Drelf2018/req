@@ -93,7 +93,11 @@ type Ticker struct {
 
 // Stop 手动停止重试计时器
 func (t *Ticker) Stop() {
-	close(t.stop)
+	select {
+	case <-t.stop:
+	default:
+		close(t.stop)
+	}
 }
 
 func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
@@ -106,29 +110,26 @@ func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
 		if !ok {
 			return
 		}
+		// 初始化定时器或重置定时器
 		if timer == nil {
-			// 初始化定时器
 			timer = time.NewTimer(delay)
 		} else {
-			// 排空现有通道，再重置定时器
-			select {
-			case <-timer.C:
-			default:
-			}
 			timer.Reset(delay)
 		}
 		// 监听定时器或停止通道触发
 		select {
-		case t := <-timer.C:
-			// 将定时器触发时间非阻塞转发给用户
+		case now := <-timer.C:
+			// 将定时器触发时间阻塞转发给用户
 			select {
-			case out <- t:
-			default:
+			case out <- now:
+			case <-t.stop:
+				return
 			}
-			timer.Stop()
 		case <-t.stop:
 			// 用户主动关闭
-			timer.Stop()
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return
 		}
 	}
@@ -136,8 +137,8 @@ func (t *Ticker) run(retry RetryTicker, out chan time.Time) {
 
 // NewTicker 创建并立即启动 Ticker
 func NewTicker(retry RetryTicker) *Ticker {
-	c := make(chan time.Time, 1) // 转发通道，不能将内部定时器的通道直接导出
-	t := &Ticker{C: c, stop: make(chan struct{})}
-	go t.run(retry, c)
+	out := make(chan time.Time) // 转发通道，不能将内部定时器的通道直接导出
+	t := &Ticker{C: out, stop: make(chan struct{})}
+	go t.run(retry, out)
 	return t
 }
