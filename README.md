@@ -528,26 +528,26 @@ func TestForm(t *testing.T) {
 data: age=17&name=Nana7mi
 ```
 
-### 重试计时器
+### 延迟器
 
-在发送请求失败时，往往需要重复多次，均失败后才认定请求失败。但是我们不会无节制不停歇的重试，有没有好办法能让我们知道要重试几次、多久后重试呢？有的兄弟有的，在 [`retry.go`](retry.go) 中定义的 `RetryTicker` 接口可以轻松的结局这个问题。
+在发送请求失败时，往往需要重复多次，均失败后才认定请求失败。但是我们不会无节制不停歇的重试，有没有好办法能让我们知道要重试几次、多久后重试呢？有的兄弟有的，在 [`delay.go`](delay.go) 中定义的 `Delayer` 接口可以轻松的结局这个问题。
 
 ```go
-// RetryTicker 重试计时器
-type RetryTicker interface {
-	// NextRetry 用于计算下次重试前需要等待的时间，入参为已重试次数，返回值为等待时间以及是否继续重试
-	NextRetry(retried int) (delay time.Duration, ok bool)
+// Delayer 延迟器
+type Delayer interface {
+	// NextDelay 计算下次延迟前需要等待的时长，入参为已延迟次数，返回值为等待时长以及是否继续延迟
+	NextDelay(times int) (delay time.Duration, ok bool)
 }
 ```
 
-在这里预设了多种重试器方便使用和参考。
+在这里预设了多种延迟器方便使用和参考。
 
 ```go
-// DoubleTicker 倍增计时器，初始重试间隔 1 秒，之后每次重试间隔翻倍，值为最大重试次数
-type DoubleTicker int
+// DoubleDelayer 倍增延迟器，初始延迟间隔 1 秒，之后每次延迟间隔翻倍，值为最大延迟次数
+type DoubleDelayer int
 
-func (t DoubleTicker) NextRetry(retried int) (time.Duration, bool) {
-	return (1 << retried) * time.Second, retried < int(t)
+func (d DoubleDelayer) NextDelay(times int) (time.Duration, bool) {
+	return (1 << times) * time.Second, times < int(d)
 }
 ```
 

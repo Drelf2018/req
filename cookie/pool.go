@@ -106,12 +106,12 @@ func (k *KeepaliveCookieJar) Run() {
 	k.Verify(context.Background())
 }
 
-// Keepalive 自动保活 http.CookieJar ，延时结束后进行一次检测，如果不传入则立即执行一次检测，传入非正数则不预先检测
-func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, retry req.RetryTicker, delay ...time.Duration) {
-	// 可以主动取消
+// Keepalive 保活 http.CookieJar ，延迟器决定每次保活的间隔，
+// 延时决定是否预先进行一次检测，传入正数则在延时后检测，不传入则立即检测，传入非正数则不预先检测
+func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, delayer req.Delayer, delay ...time.Duration) {
+	// 用于主动取消
 	ctx, k.cancel = context.WithCancel(ctx)
 	defer k.cancel()
-	// 延时结束后进行一次检测，如果不传入则立即执行一次检测
 	var totalDelay time.Duration
 	for _, d := range delay {
 		totalDelay += d
@@ -132,8 +132,8 @@ func (k *KeepaliveCookieJar) Keepalive(ctx context.Context, retry req.RetryTicke
 	} else if totalDelay == 0 {
 		k.Verify(ctx)
 	}
-	// 每当重试器触发时进行一次检测
-	ticker := req.NewTicker(retry)
+	// 每当延迟器触发时进行一次检测
+	ticker := req.NewDelayTicker(delayer)
 	for {
 		select {
 		case <-ctx.Done():
@@ -156,15 +156,15 @@ func (k *KeepaliveCookieJar) StopKeepalive() {
 }
 
 // KeepaliveWithContext 携带上下文立即开始保活 http.CookieJar
-func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, retry req.RetryTicker, delay ...time.Duration) *KeepaliveCookieJar {
+func KeepaliveWithContext(ctx context.Context, jar http.CookieJar, refresher Refresher, delayer req.Delayer, delay ...time.Duration) *KeepaliveCookieJar {
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher}
-	go k.Keepalive(ctx, retry, delay...)
+	go k.Keepalive(ctx, delayer, delay...)
 	return k
 }
 
 // Keepalive 立即开始保活 http.CookieJar
-func Keepalive(jar http.CookieJar, refresher Refresher, retry req.RetryTicker, delay ...time.Duration) *KeepaliveCookieJar {
-	return KeepaliveWithContext(context.Background(), jar, refresher, retry, delay...)
+func Keepalive(jar http.CookieJar, refresher Refresher, delayer req.Delayer, delay ...time.Duration) *KeepaliveCookieJar {
+	return KeepaliveWithContext(context.Background(), jar, refresher, delayer, delay...)
 }
 
 // Pool 是自动保活的 http.CookieJar 的池，可以获取随机已验证的实例
@@ -193,7 +193,7 @@ func (p *Pool) Add(jar http.CookieJar, refresher Refresher, delay ...time.Durati
 	}
 	k := &KeepaliveCookieJar{CookieJar: jar, Refresher: refresher, OnError: p.OnError}
 	p.cookies = append(p.cookies, k)
-	go k.Keepalive(p.ctx, req.ForeverTicker(p.Refresh), delay...)
+	go k.Keepalive(p.ctx, req.ForeverDelayer(p.Refresh), delay...)
 	return k
 }
 
