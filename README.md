@@ -598,6 +598,6 @@ func TestCookies(t *testing.T) {
 
 在 [`cookie/pool.go`](cookie/pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `http.CookieJar` ，具体怎么用我也还没搞清楚，就当留给读者的课后题吧！
 
-### 请求模板
+### 工作流引擎
 
-在 [`template/template.go`](template/template.go) 里提供了一个请求模板，用来自动化发送请求。反正我是用来实现 `webhook` 的，你想知道怎么用的话请参考 [`cmd/template`](cmd/template) 。
+在 [`template`](template) 目录下提供了一个工作流引擎，用于通过 YAML 编排一系列请求：并发任务调度、`needs` 依赖、`if` 条件（success/failure/cancelled）、`curl` 风格步骤、输入校验、输出提取、依赖环检测一应俱全，还会自动管理步骤间的 Cookie 会话。反正我是用来实现 `webhook` 的，你想知道怎么用的话请参考 [`template/README.md`](template/README.md) 。
