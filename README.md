@@ -90,10 +90,10 @@ https://httpbin.org/anything/followers/12306?page_limit=30
 细心的朋友可能发现了，字段 `PageLimit` 的值自动设置在了地址中参数 `page_limit` 之后。这是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成下划线参数名的函数 `NameReplacer` 。你也可以自行替换这个函数变量，实现自己的参数名转换函数。
 
 ```go
-var NameReplacer = CamelToSnake
+var NameReplacer = PascalToSnake
 
-// CamelToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
-func CamelToSnake(s string) string {
+// PascalToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
+func PascalToSnake(s string) string {
 	if s == "" {
 		return ""
 	}
@@ -181,10 +181,10 @@ func TestPost(t *testing.T) {
 同时字段 `AcceptLanguage` 的值自动设置为了请求头 `Accept-Language` 的值。这同样是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成请求头的函数 `HeaderReplacer` 。
 
 ```go
-var HeaderReplacer = CamelToHyphenated
+var HeaderReplacer = PascalToHyphenated
 
-// CamelToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
-func CamelToHyphenated(s string) string {
+// PascalToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
+func PascalToHyphenated(s string) string {
 	if s == "" {
 		return ""
 	}

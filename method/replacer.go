@@ -6,12 +6,12 @@ import (
 )
 
 var (
-	NameReplacer   = CamelToSnake
-	HeaderReplacer = CamelToHyphenated
+	NameReplacer   = PascalToSnake
+	HeaderReplacer = PascalToHyphenated
 )
 
-// CamelToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
-func CamelToSnake(s string) string {
+// PascalToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
+func PascalToSnake(s string) string {
 	if s == "" {
 		return ""
 	}
@@ -32,8 +32,8 @@ func CamelToSnake(s string) string {
 	return result.String()
 }
 
-// CamelToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
-func CamelToHyphenated(s string) string {
+// PascalToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
+func PascalToHyphenated(s string) string {
 	if s == "" {
 		return ""
 	}
