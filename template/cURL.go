@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -163,45 +162,13 @@ func CURLToRequest(ctx context.Context, curl string) (*http.Request, error) {
 	if err != nil {
 		return nil, fmt.Errorf("req/template.CURLToRequest: failed to parse curl: %w", err)
 	}
+	// 允许直接粘贴完整命令，前导的 curl 可省
+	if len(args) > 0 && args[0] == "curl" {
+		args = args[1:]
+	}
 	req, err := argsToRequest(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("req/template.CURLToRequest: %w", err)
 	}
 	return req, nil
-}
-
-// curlAPI 将 argsToRequest 的产物桥接回根库会话
-type curlAPI struct {
-	req  *http.Request
-	body string // 反读出的请求体文本
-}
-
-func (c curlAPI) Method() string { return c.req.Method }
-func (c curlAPI) RawURL() string { return c.req.URL.String() }
-
-// 实现 method.APIBody：Session 重建请求时塞回 body
-func (c curlAPI) Body(*http.Request, reflect.Value, []reflect.StructField) (io.Reader, error) {
-	if c.body == "" {
-		return nil, nil
-	}
-	return strings.NewReader(c.body), nil
-}
-
-// 实现 method.APIHeader：curl 的显式头覆盖会话默认头
-func (c curlAPI) Header(r *http.Request, _ reflect.Value, _ []reflect.StructField) error {
-	for k, vs := range c.req.Header {
-		r.Header.Del(k) // 先清掉默认头，让 curl 显式值优先
-		for _, v := range vs {
-			r.Header.Add(k, v)
-		}
-	}
-	return nil
-}
-
-// 实现 method.APICookie：curl -b 的显式 Cookie
-func (c curlAPI) Cookie(r *http.Request, _ reflect.Value, _ []reflect.StructField) error {
-	for _, ck := range c.req.Cookies() {
-		r.AddCookie(ck)
-	}
-	return nil
 }

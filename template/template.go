@@ -88,6 +88,7 @@ var BuiltinFuncMap = template.FuncMap{
 	"plaintext": Plaintext,
 }
 
+// NewTemplate 创建绑定了内置函数的新模板
 func NewTemplate(name string) *template.Template {
 	return template.New(name).Funcs(BuiltinFuncMap)
 }

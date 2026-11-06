@@ -11,14 +11,14 @@ _✨ 通过结构体发送请求 ✨_
 在正式开始使用前，我们需要了解如何实现一个 `API` 接口。
 
 ```go
-// API 接口
+// API 用于定义基本接口
 type API interface {
 	Method() string
 	RawURL() string
 }
 ```
 
-在 [`interfaces.go`](interfaces.go) 中定义了 `API` 接口，它是用来描述请求的，包括请求地址 `RawURL` 方法和请求方法 `Method` 方法，通常需要用户自行实现。
+在 [`method/interfaces.go`](method/interfaces.go) 中定义了 `API` 接口，它是用来描述请求的，包括请求方法 `Method` 方法和请求地址 `RawURL` 方法，通常需要用户自行实现。
 
 ```go
 type SimpleGet struct{}
@@ -87,58 +87,43 @@ https://httpbin.org/anything/followers/10086?page_limit=10
 https://httpbin.org/anything/followers/12306?page_limit=30
 ```
 
-细心的朋友可能发现了，字段 `PageLimit` 的值自动设置在了地址中参数 `page_limit` 之后。这是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成下划线参数名的函数 `NameReplacer` 。你也可以自行替换这个函数变量，实现自己的参数名转换函数。
+细心的朋友可能发现了，字段 `PageLimit` 的值自动设置在了地址中参数 `page_limit` 之后。这是因为项目 [`method/task.go`](method/task.go) 中内置了一个参数名转换器 `Renamer` ，它会按参数类型分派：`header` 目标转成横杠连接，其它目标转成下划线连接。你也可以替换 `DefaultRenamer` 变量，实现自己的参数名转换。
 
 ```go
-var NameReplacer = PascalToSnake
+// Renamer 参数名转换器
+type Renamer struct{}
 
-// PascalToSnake 将字符串中的大写字母替换为下划线加小写字母，大写首字母前不添加下划线，连续的大写字母只在第一个字母前添加下划线
-func PascalToSnake(s string) string {
-	if s == "" {
-		return ""
+func (Renamer) Rename(target string, name string) string {
+	if target == "header" {
+		return PascalToHyphenated(name)
 	}
-	var result strings.Builder
-	for i, r := range s {
-		if unicode.IsUpper(r) {
-			// 不是第一个字符并且前一个不是大写字母，添加下划线
-			if i > 0 && !unicode.IsUpper(rune(s[i-1])) {
-				result.WriteRune('_')
-			}
-			// 转成小写字母
-			result.WriteRune(unicode.ToLower(r))
-		} else {
-			// 非大写字母直接添加
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
+	return PascalToSnake(name)
 }
+
+// DefaultRenamer 全局参数名转换器
+var DefaultRenamer APIRenamer = Renamer{}
 ```
 
 ### 标签 `req`
 
 这个标签用于声明字段在请求中的参数类型，例如 `req:"body"` `req:"query"` 等。
 
-其完整格式为 `req:"param[:name][,omitempty]"` ，一个具体的例子为 `req:"header:X-Forwarded-For,omitempty"` 。
+其完整格式为 `req:"<target>[:<name>][,omitempty|,required]"` ，一个具体的例子为 `req:"header:X-Forwarded-For,omitempty"` 。
 
-`param` 区域是必填的，一般使用 `body` `query` `header` `cookie` 之一，具体原因可见后文。
+`<target>` 区域是必填的，一般使用 `body` `query` `header` `cookie` 之一。也可以写自定义标签，交给 `APICustom` 钩子处理。
 
-`[:name]` 区域是可选的，如果对内置的参数名转换函数结果不满意，可以直接设置这个字段对应的参数名。
+`[:<name>]` 区域是可选的，如果对内置的参数名转换结果不满意，可以直接设置这个字段对应的参数名。
 
-`[,omitempty]` 区域是可选的，当字段值是其类型零值并且选用了这个区域，那么就不会生成其对应的参数。
+修饰符区域是可选的，二者互斥，且都不能和 `default` 标签同时使用：
+
+- `,omitempty` 整条取值链都没取到值时，不生成这个参数。
+- `,required` 整条取值链都没取到值时，直接返回错误 `method.ErrMissing` 。
 
 ### 标签 `default`
 
 这个标签用于设置字段值为其类型零值，并且没有在 `req` 标签中设置忽略时的默认值。
 
-在项目 [`method/utils.go`](method/utils.go) 中有一个字符串转对应类型值的函数 `Unmarshal` ，可以把标签中设置的字符串转化成字段类型的值。
-
-```go
-// Unmarshal 将字符串转换为指定类型的值
-func Unmarshal(value reflect.Value, s string) (any, error) {
-	// ...
-}
-```
+默认值会按字段类型解码：字符串目标（`query` `header` `cookie`）原样发出。`body` 目标则先转成字段类型，例如 `int` 字段写 `default:"30"` 得到的是数字 `30` 而不是字符串 `"30"` 。这一步由 [`method/codec.go`](method/codec.go) 里的 `DecodeType` 完成。
 
 ### 为 `POST` 请求添加请求体和请求头
 
@@ -175,28 +160,6 @@ func TestPost(t *testing.T) {
 {
 	"refresh_now": true,
 	"sign": "\u8fd9\u4e2a\u4eba\u5f88\u61d2"
-}
-```
-
-同时字段 `AcceptLanguage` 的值自动设置为了请求头 `Accept-Language` 的值。这同样是因为项目 [`method/replacer.go`](method/replacer.go) 中内置了一个将驼峰字段名转换成请求头的函数 `HeaderReplacer` 。
-
-```go
-var HeaderReplacer = PascalToHyphenated
-
-// PascalToHyphenated 将字符串中的大写字母替换为横杠加大写字母，大写首字母前不添加横杠，连续的大写字母只在第一个字母前添加横杠
-func PascalToHyphenated(s string) string {
-	if s == "" {
-		return ""
-	}
-	var result strings.Builder
-	for i, r := range s {
-		// 本身是大写字母，不是第一个字符并且前一个不是大写字母，添加横杠
-		if unicode.IsUpper(r) && i > 0 && !unicode.IsUpper(rune(s[i-1])) {
-			result.WriteRune('-')
-		}
-		result.WriteRune(r)
-	}
-	return result.String()
 }
 ```
 
@@ -280,6 +243,8 @@ func TestUpload(t *testing.T) {
 }
 ```
 
+需要留意的是，这个构造器在构建请求体时会把文件字段读完并顺手 `Close()` ，所以它构建的请求**不能重试**。
+
 ## 利用 `API` 发送请求
 
 之前在发送请求时使用了 `req.Text` 函数，实际上这个函数的内部调用了 `req.DefaultSession` 的 `Text` 方法。
@@ -294,11 +259,9 @@ type Session struct {
 
 	// 默认请求头，会自动为每个请求添加
 	Header http.Header
-
-	// 自定义变量，当字段标签 default 中的值以 "$" 开头则会尝试在该字典中查找对应值
-	Variables map[string]any
 }
 
+// DefaultSession 默认会话
 var DefaultSession = &Session{
 	Header: http.Header{
 		"User-Agent": {UserAgent},
@@ -306,29 +269,96 @@ var DefaultSession = &Session{
 }
 ```
 
-这里的 `Session` 结构体是一个会话，提供了设置基础路径、设置默认请求头、设置自定义变量、拼接地址、创建请求、发送请求、请求前钩子、响应后钩子、获取字符串形式响应体、响应体写入文件、反序列化响应体至对象、解包错误等一系列功能。在 [`req.go`](req.go) 中提供的全局函数，都是调用默认会话的同名方法实现的。
+这里的 `Session` 结构体是一个会话，提供了拼接地址 `JoinPath`、创建请求 `NewRequest`、发送请求 `Do`、克隆自己 `Clone`、获取响应体 `Content` `Text`、写入文件 `Write`、反序列化 `Result` `JSON` 等功能。在 [`req.go`](req.go) 中提供的全局函数，都是调用默认会话的同名方法实现的。
 
-### 自定义变量
-
-在前文介绍标签 `default` 时，提到了它是用来设置默认值。如果要设置的默认值过于复杂、不适合在标签中以字符串形式表示，可以设置一个以 `$` 开头的变量名，并且使用会话的 `Set` 方法设置其值。
+会话的默认配置不在方法里，而是由 `NewSession` 和一组选项函数给出：
 
 ```go
-type Variables struct {
+session := req.NewSession(
+	req.SetClient(http.DefaultClient),
+	req.ParseURL("https://httpbin.org"),
+	req.SetHeader("Accept-Language", "zh-CN"),
+	req.SetAuthorization("Bearer 123456"),
+	req.SetUserAgent(req.UserAgent),
+)
+```
+
+可用的选项有 `SetClient` `ParseURL` `SetHeaders` `SetHeaderMap` `SetHeader` `SetAuthorization` `SetUserAgent` 。其中 `SetHeaders` 会整体替换默认请求头，`SetHeaderMap` 和 `SetHeader` 则是添加。
+
+每个发送请求的方法都有一个带 `WithContext` 的版本，例如 `Text` 和 `TextWithContext` ，实现超时控制或取消。
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+defer cancel()
+text, err := session.TextWithContext(ctx, MyAPI{})
+```
+
+### 取值链
+
+取值链按固定顺序往下找，**命中就停**：
+
+| 顺序 | 来源 | 声明方式 | 拿到的值 |
+|---|---|---|---|
+| 1 | 字段自身 | —— | 字段的实际值，但 `IsZero()` 为假才算有值 |
+| 2 | 上下文 | `ctx:"<key>"` | `ctx.Value(key)` |
+| 3 | Cookie | `cookie:"<name>"` | `CookieReader.Cookie(name)` |
+| 4 | 环境变量 | `env:"<key>"` | `os.LookupEnv(key)` |
+| 5 | 默认值 | `default:"<value>"` | 值本身 |
+
+整条链走完还是没值，再看 `req` 标签上的修饰符：
+
+| 链尾策略 | 行为 |
+|---|---|
+| `,omitempty` | 这个键**整个不出现** |
+| `,required` | 报错 `req/method: required but no value resolved` |
+| 都没有 | 标量用字段类型的**零值**，切片和映射则**整个不出现** |
+
+```go
+type Resolve struct {
+	// 1. 字段自身
+	UID int `req:"query"`
+
+	// 2. 值来自上下文，写进 query 时叫 token
+	Token string `req:"query:token" ctx:"token"`
+
+	// 3. 值来自请求里的 session_id，写进请求头时叫 X-Session
+	Session string `req:"header:X-Session" cookie:"session_id"`
+
+	// 4. 值来自环境变量
+	Region string `req:"query" env:"REGION"`
+
+	// 5. 值来自默认值
+	PageLimit int `req:"query" default:"30"`
+
+	// 链尾：没值就整个省略
+	Debug string `req:"query,omitempty"`
+
+	// 链尾：没值就报错
+	Must string `req:"query,required"`
+}
+```
+
+后三步（Cookie / 环境变量 / 默认值）拿到的都是**字符串**。只有 JSON 请求体这类**保留类型**的去处才会按字段类型解码（`"30"` → `int`），query / header / cookie 始终按字符串发送。上下文的取值是 `any`，**类型原样保留**，写进 JSON 请求体时不会变成字符串。
+
+下面这个例子把"值从哪来"和"值去哪"分开用：字段本身没值，值从上下文的 `sid` 拿，最后写成一个名叫 `session_id` 的 Cookie。
+
+```go
+type FromContext struct {
 	UID       int    `req:"query"`
-	SessionID string `req:"cookie" default:"$sid"`
+	SessionID string `req:"cookie:session_id" ctx:"sid"`
 }
 
-func (Variables) Method() string {
+func (FromContext) Method() string {
 	return http.MethodGet
 }
 
-func (Variables) RawURL() string {
+func (FromContext) RawURL() string {
 	return "https://httpbin.org/get"
 }
 
-func TestVariables(t *testing.T) {
-	req.DefaultSession.Set("$sid", "d926f241-28a4-4be3-8022-7b880b348bfa")
-	text, err := req.Text(&Variables{UID: 10086})
+func TestFromContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), "sid", "d926f241-28a4-4be3-8022-7b880b348bfa")
+	text, err := req.TextWithContext(ctx, &FromContext{UID: 10086})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,41 +370,30 @@ func TestVariables(t *testing.T) {
 Cookie: session_id=d926f241-28a4-4be3-8022-7b880b348bfa
 ```
 
-如果不想使用全局默认值，可以使用需要传入上下文的函数。在查找默认值时，会优先调用上下文的 `Value` 方法，未找到时才会继续使用全局默认值。
-
-```go
-func TestVariables(t *testing.T) {
-	req.DefaultSession.Set("$sid", "d926f241-28a4-4be3-8022-7b880b348bfa")
-	ctx := context.WithValue(context.Background(), "$sid", "new-session-id")
-	text, err := req.TextWithContext(ctx, &Variables{UID: 10086})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log(text)
-}
-```
-
-```
-Cookie: session_id=new-session-id
-```
-
 ### 钩子
 
-在 `API` 实现接口 `BeforeRequest` 后，会在发送请求前调用其方法，通常用于打印日志、修改请求参数、中断请求等。
+一次请求里所有钩子的调用顺序是固定的：
+
+```
+解析字段 → cookie 钩子 → header 钩子 → body 钩子 → 建请求
+        → query 钩子 → custom 钩子 → BeforeRequest → 发送 → AfterResponse
+```
+
+其中 `BeforeRequest` 和 `AfterResponse` 在**每次重试**时都会重新跑一遍。
 
 ```go
 // BeforeRequest 请求前钩子
 type BeforeRequest interface {
-	BeforeRequest(cli *http.Client, req *http.Request, api API) error
+	BeforeRequest(*http.Client, *http.Request, API) error
 }
 ```
 
-在 `API` 实现接口  `CheckResponse` 后，会在收到响应后调用其方法，通常用于判断**状态码**是否正确，当 `API` 未实现这个接口时，默认判断响应是否为 `200 OK` 。
+在 `API` 实现接口 `AfterResponse` 后，会在收到响应后调用其方法，通常用于判断**状态码**是否正确。当 `API` 未实现这个接口时，默认要求响应状态码在 `2xx` 范围内。
 
 ```go
-// CheckResponse 检验响应，出现错误时必须自行调用 resp.Body.Close()
-type CheckResponse interface {
-	CheckResponse(cli *http.Client, resp *http.Response, api API) error
+// AfterResponse 响应后钩子，用于检验状态码，出现错误时必须自行关闭响应体
+type AfterResponse interface {
+	AfterResponse(*http.Client, *http.Response, API) error
 }
 ```
 
@@ -417,92 +436,109 @@ func (s *Session) Result(api API, result any) (err error) {
 在使用本项目的过程中，你有没有想过，结构体是怎么变成请求的？在 [`method/interfaces.go`](method/interfaces.go) 中定义了五种接口：
 
 ```go
-// API Cookie
-type APICookie interface {
-	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
-}
-
-// API 请求体
-type APIBody interface {
-	Body(r *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error)
-}
-
-// API 请求参数
-type APIQuery interface {
-	Query(r *http.Request, value reflect.Value, query []reflect.StructField) error
-}
-
-// API 请求头
+// APIHeader 用于设置请求头
 type APIHeader interface {
-	Header(r *http.Request, value reflect.Value, header []reflect.StructField) error
+	Header(ctx context.Context, api API, reader CookieReader, header []Field) (http.Header, error)
 }
 
-// API 自定义标签
+// APICookie 用于设置 Cookie
+type APICookie interface {
+	Cookie(ctx context.Context, api API, reader CookieReader, cookie []Field) ([]*http.Cookie, error)
+}
+
+// APIBody 用于设置请求体
+type APIBody interface {
+	Body(ctx context.Context, api API, reader CookieReader, body []Field) (io.Reader, http.Header, error)
+}
+
+// APIQuery 用于设置请求参数
+type APIQuery interface {
+	Query(ctx context.Context, api API, reader CookieReader, query []Field) (string, error)
+}
+
+// APICustom 用于处理自定义标签
 type APICustom interface {
-	Custom(r *http.Request, value reflect.Value, custom map[string][]reflect.StructField) error
+	Custom(ctx context.Context, api API, r *http.Request, custom map[string][]Field) error
+}
+```
+
+它们的形状是统一的「环境 + 载荷」：`ctx` 和 `CookieReader` 是环境，`[]Field` 是载荷。钩子只负责把值**做出来返回**，不直接改请求。
+
+`Field` 里已经带好了编译期算出来的编码器，所以钩子拿到的是现成的字段描述，不需要自己反射。
+
+`CookieReader` 是一个只有一个方法的接口：
+
+```go
+// CookieReader 用于读取 Cookie
+type CookieReader interface {
+	Cookie(name string) (*http.Cookie, error)
 }
 ```
 
 你可以通过实现这些接口，来自行构建请求。例如本项目默认 `query` 的实现方法：
 
 ```go
-// AddValue 根据提供的 StructField 添加对应的值
-func AddValue(ctx context.Context, val reflect.Value, field reflect.StructField, add func(string, string))
-
-// MakeURLValues 根据提供的 []StructField 制作 url.Values
-func MakeURLValues(ctx context.Context, val reflect.Value, fields []reflect.StructField) url.Values {
-	u := make(url.Values, len(fields))
+// WalkFields 按取值链逐条产出字段的名字和值，按字段顺序、切片逐元素展开
+func WalkFields(ctx context.Context, api API, reader CookieReader, fields []Field, yield func(name, value string)) error {
+	value := reflect.Indirect(reflect.ValueOf(api))
 	for _, field := range fields {
-		AddValue(ctx, val, field, u.Add)
+		ss, err := field.ToString(ctx, value, reader)
+		if err != nil {
+			return err
+		}
+		for _, s := range ss {
+			yield(field.Name, s)
+		}
 	}
-	return u
+	return nil
 }
 
-// AddQuery 向 req 请求添加请求参数
-func AddQuery(req *http.Request, val reflect.Value, query []reflect.StructField) {
-	q := MakeURLValues(req.Context(), val, query)
-	if len(q) != 0 {
-		req.URL.RawQuery = q.Encode()
+// MakeURLValues 按取值链把字段做成 url.Values，切片会展开成多条同名参数
+func MakeURLValues(ctx context.Context, api API, reader CookieReader, fields []Field) (url.Values, error) {
+	u := make(url.Values, len(fields))
+	err := WalkFields(ctx, api, reader, fields, u.Add)
+	if err != nil {
+		return nil, err
 	}
+	return u, nil
+}
+
+// MakeQuery 按取值链把 query 字段做成参数字符串
+func MakeQuery(ctx context.Context, api API, reader CookieReader, query []Field) (string, error) {
+	q, err := MakeURLValues(ctx, api, reader, query)
+	if err != nil {
+		return "", err
+	}
+	return q.Encode(), nil
 }
 ```
 
 上面代码中的全局函数均在 `method` 目录下导出，方便你用来构建自己的请求方式。
 
-这里的 `ctx` 包装了用户传入的上下文，`val` 是传入的 `API` 对象的反射值，`query` 是**修改过的**设置了对应标签的结构体字段。
-
-即传入 `APIBody` 接口的是带有 `req:"body"` 的字段，传入 `APIHeader` 的是带有 `req:"header"` 的字段等，前文提及的可以自定义的标签会传入 `APICustom` 接口。
+这里的 `ctx` 是用户传入的上下文，`api` 是 `API` 对象本身，`reader` 是用来获取 Cookie 的载体，`query` 是设置了 `req:"query"` 的字段。
 
 以下是本项目的 `Form` 请求体的实现方法：
 
 ```go
-// 以 Form 表单为请求体的 POST 请求构造器
-type PostForm struct {
-	ContentType string `req:"header" default:"application/x-www-form-urlencoded"`
-}
+// PostForm 是 POST 请求构造器，以 Form 表单创建请求体
+type PostForm struct{}
 
 func (PostForm) Method() string {
 	return http.MethodPost
 }
 
-func (PostForm) Body(req *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error) {
-	return strings.NewReader(MakeURLValues(req.Context(), value, body).Encode()), nil
+func (PostForm) Body(ctx context.Context, api API, reader CookieReader, body []Field) (io.Reader, http.Header, error) {
+	form, err := MakeURLValues(ctx, api, reader, body)
+	if err != nil {
+		return nil, nil, err
+	}
+	return strings.NewReader(form.Encode()), ContentType("application/x-www-form-urlencoded"), nil
 }
 
 var _ APIBody = PostForm{}
 ```
 
-注意到它还同时实现了 `Method` 方法并且包含一个 `ContentType` 请求头字段，这意味着你可以直接将它嵌入你的 `API` 结构体，本项目将四个已实现的构造器提升到了主目录。
-
-```go
-// req.go
-type (
-	Get               = method.Get
-	PostJSON          = method.PostJSON
-	PostForm          = method.PostForm
-	PostMultipartForm = method.PostMultipartForm
-)
-```
+注意到它还同时实现了 `Method` 方法，所以你可以直接把它嵌入自己的 `API` 结构体。响应体的 Content-Type 由 `Body` 的第二个返回值给出。
 
 ```go
 type Form struct {
@@ -530,12 +566,13 @@ data: age=17&name=Nana7mi
 
 ### 延迟器
 
-在发送请求失败时，往往需要重复多次，均失败后才认定请求失败。但是我们不会无节制不停歇的重试，有没有好办法能让我们知道要重试几次、多久后重试呢？有的兄弟有的，在 [`delay.go`](delay.go) 中定义的 `Delayer` 接口可以轻松的结局这个问题。
+在发送请求失败时，往往需要重复多次，均失败后才认定请求失败。但是我们不会无节制不停歇的重试，有没有好办法能让我们知道要重试几次、多久后重试呢？有的兄弟有的，在 [`delay.go`](delay.go) 中定义的 `Delayer` 接口可以轻松地解决这个问题。
 
 ```go
-// Delayer 延迟器
+// Delayer 延迟器，决定重试的间隔与次数。
+//
+// 向延迟器传入已重试次数，会判断是否继续重试并计算休眠间隔。
 type Delayer interface {
-	// NextDelay 计算下次延迟前需要等待的时长，入参为已延迟次数，返回值为等待时长以及是否继续延迟
 	NextDelay(times int) (delay time.Duration, ok bool)
 }
 ```
@@ -549,19 +586,36 @@ type DoubleDelayer int
 func (d DoubleDelayer) NextDelay(times int) (time.Duration, bool) {
 	return (1 << times) * time.Second, times < int(d)
 }
+
+// DefaultDelayer 默认延迟器，“试”不过三
+var DefaultDelayer Delayer = DoubleDelayer(2)
 ```
 
-### 上下文
+| 延迟器 | 行为 |
+|---|---|
+| `DoubleDelayer(n)` | 从 1 秒开始每次翻倍，最多重试 `n` 次，`DefaultDelayer` 就是 `DoubleDelayer(2)` |
+| `ForeverDelayer(d)` | 永远返回 `d`，**永远不到期** |
+| `ZeroDelayer(n, whySafe)` | 零间隔，最多重试 `n` 次；`whySafe` 是逼你写清为什么不怕打爆对方 |
+| `FibonacciDelayer{1s, 2s, 10s}` | 前两项是种子，之后按斐波那契递增，超过第三项就停 |
+| `RandomDelayer{1s, 5s}` | 在区间里随机，**永远不到期** |
+| `DelayFunc(f)` | 把 `func(int) (time.Duration, bool)` 包成延迟器 |
 
-在 [`value.go`](value.go) 里提供了 `WithMap` `WithValues` 两种可以携带值的上下文包裹函数。
+把它用到请求上很简单，嵌入已写好的延迟器，或者给 `API` 加一个 `NextDelay` 方法，会话会在第一次失败之后开始重试。
 
-### 请求池
+```go
+func (x *MyAPI) NextDelay(times int) (time.Duration, bool) {
+	return req.DefaultDelayer.NextDelay(times)
+}
+```
 
-在 [`pool.go`](pool.go) 里提供了 `Pool` 用于管理请求，它是零值可用的。
+- `times` 是**已经重试过的次数**（从 0 开始）。
+- 返回 `ok == false`（延迟器到期）就停止重试，并把**最后一次**请求的错误返回出去。
+- 每次重试都会**重新构建请求**，重新跑一遍取值链，也重新跑一遍 `BeforeRequest`。
+- 等待期间 `ctx` 被取消会立刻中止，并返回 `ctx.Err()`。
 
 ### Cookie 转换器
 
-在 [`cookie/cookie.go`](cookie/cookie.go) 里提供了可以将结构体中 `string` 类型或嵌入的结构体中 `string` 类型的字段转换成对应 `*http.Cookie` 对象的函数。只有设置了 `cookie` 标签的导出字段会被用于存取。
+在 [`cookie/cookie.go`](cookie/cookie.go) 里提供了可以将结构体中 `string` 类型或嵌入的结构体中 `string` 类型的字段转换成对应 `*http.Cookie` 对象的函数。只有设置了 `cookie` 标签的导出字段会被用于存取。想兜住那些结构体没声明的键值，可以加一个 `map[string]string` 字段并标上 `cookie:",embed"` 。另外注意嵌入的结构体**必须是导出的**，否则整块会被跳过。
 
 ```go
 type UserInfo struct {
@@ -586,17 +640,43 @@ func TestCookies(t *testing.T) {
 			Description: "Shark",
 		},
 	}
-	t.Log(cookie.Get(c))
+	t.Log(cookie.Get(&c))
 }
 ```
 
 ```
-[session_id=d926f241-28a4-4be3-8022-7b880b348bfa name=Nana7mi Desc=Shark Token=c99f18ad]
+[Token=c99f18ad session_id=d926f241-28a4-4be3-8022-7b880b348bfa name=Nana7mi Desc=Shark] <nil>
 ```
 
-### 可持续化 Cookie 池
+### 保活 Cookie
 
-在 [`cookie/pool.go`](cookie/pool.go) 里提供了一个池，用来持续化保存、刷新、获取 `http.CookieJar` ，具体怎么用我也还没搞清楚，就当留给读者的课后题吧！
+[`cookie/keepalive.go`](cookie/keepalive.go) 里的 `KeepaliveCookieJar` 把任意 `http.CookieJar` 包起来，只负责**验证一次**：
+
+- 实现 `Refresher`（`Refresh`）就能用；再实现 `Validator`（`Valid`）就会先查、无效才刷，否则每次直接刷新。
+- `State()` 读当前状态，`SinceVerified()` 看距离上次验证成功过了多久。
+- **它不起 goroutine**：多久验一次、怎么退出都由你自己写，错误也由你自己处理。
+
+````go
+k := &cookie.KeepaliveCookieJar{CookieJar: jar, Refresher: r}
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+k.Verify(ctx) // 想先验一次就放这里
+ticker := req.NewDelayTicker(req.ForeverDelayer(time.Minute))
+defer ticker.Stop()
+for {
+	select {
+	case <-ctx.Done():
+		return
+	case _, ok := <-ticker.C:
+		if !ok {
+			return
+		}
+		_ = k.Verify(ctx)
+	}
+}
+````
 
 ### 工作流引擎
 

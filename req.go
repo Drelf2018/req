@@ -9,6 +9,7 @@ import (
 )
 
 type (
+	API               = method.API
 	Get               = method.Get
 	PostJSON          = method.PostJSON
 	PostForm          = method.PostForm

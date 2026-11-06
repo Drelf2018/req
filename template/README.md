@@ -84,8 +84,8 @@ jobs:
 如果你只想借用 `curl` 命令的解析能力而不使用工作流引擎，可以直接调用以下函数获取 `*http.Request` 对象：
 
 ```go
-req, err := template.CURLToRequest(ctx, `curl https://httpbin.org/get`)
-req, err = template.ArgsToRequest(ctx, "-G", "https://httpbin.org/get", "-d", "a=1")
+r, err := template.CURLToRequest(ctx, `curl https://httpbin.org/get`)
+r, err = template.ArgsToRequest(ctx, "-G", "https://httpbin.org/get", "-d", "a=1")
 ```
 
 ### 引用动作 `uses` 

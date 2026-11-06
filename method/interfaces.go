@@ -1,42 +1,58 @@
 package method
 
 import (
+	"context"
 	"io"
 	"net/http"
-	"reflect"
 )
 
-// Marshaler 用于将类型转换为字符串
+// Marshaler 用于将对象序列化为字符串
 type Marshaler interface {
-	MarshalString() string
+	MarshalString() (string, error)
 }
 
-// API Cookie
-type APICookie interface {
-	Cookie(r *http.Request, value reflect.Value, cookie []reflect.StructField) error
+// Unmarshaler 用于将字符串反序列化进对象
+type Unmarshaler interface {
+	UnmarshalString(string) error
 }
 
-// XSRF 请求头
-type APIXSRF interface {
-	XSRF() (xsrfCookieName, xsrfHeaderName string)
+// CookieReader 用于读取 Cookie
+type CookieReader interface {
+	Cookie(name string) (*http.Cookie, error)
 }
 
-// API 请求体
-type APIBody interface {
-	Body(r *http.Request, value reflect.Value, body []reflect.StructField) (io.Reader, error)
+// API 用于定义基本接口
+type API interface {
+	Method() string
+	RawURL() string
 }
 
-// API 请求参数
-type APIQuery interface {
-	Query(r *http.Request, value reflect.Value, query []reflect.StructField) error
+// APIRenamer 用于重命名字段
+type APIRenamer interface {
+	Rename(target string, name string) string
 }
 
-// API 请求头
+// APIHeader 用于设置请求头
 type APIHeader interface {
-	Header(r *http.Request, value reflect.Value, header []reflect.StructField) error
+	Header(ctx context.Context, api API, reader CookieReader, header []Field) (http.Header, error)
 }
 
-// API 自定义标签
+// APICookie 用于设置 Cookie
+type APICookie interface {
+	Cookie(ctx context.Context, api API, reader CookieReader, cookie []Field) ([]*http.Cookie, error)
+}
+
+// APIBody 用于设置请求体
+type APIBody interface {
+	Body(ctx context.Context, api API, reader CookieReader, body []Field) (io.Reader, http.Header, error)
+}
+
+// APIQuery 用于设置请求参数
+type APIQuery interface {
+	Query(ctx context.Context, api API, reader CookieReader, query []Field) (string, error)
+}
+
+// APICustom 用于处理自定义标签
 type APICustom interface {
-	Custom(r *http.Request, value reflect.Value, custom map[string][]reflect.StructField) error
+	Custom(ctx context.Context, api API, r *http.Request, custom map[string][]Field) error
 }

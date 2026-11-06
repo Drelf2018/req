@@ -5,13 +5,15 @@ import (
 	"time"
 )
 
-// Delayer 延迟器
+// Delayer 延迟器，决定重试的间隔与次数。
+//
+// 向延迟器传入已重试次数，返回下次要等的时长。
+// 延迟器到期时应返回 ok==false ，即不再重试。
 type Delayer interface {
-	// NextDelay 计算下次延迟前需要等待的时长，入参为已延迟次数，返回值为等待时长以及是否继续延迟
 	NextDelay(times int) (delay time.Duration, ok bool)
 }
 
-// DelayFunc 延迟函数
+// DelayFunc 用于将函数包装成延迟器
 type DelayFunc func(times int) (delay time.Duration, ok bool)
 
 func (r DelayFunc) NextDelay(times int) (time.Duration, bool) {
@@ -30,7 +32,7 @@ func (d DoubleDelayer) NextDelay(times int) (time.Duration, bool) {
 // DefaultDelayer 默认延迟器，“试”不过三
 var DefaultDelayer Delayer = DoubleDelayer(2)
 
-// ForeverDelayer 永久延迟器，每次都返回当前值的延迟间隔
+// ForeverDelayer 永久延迟器，每次都返回当前值的延迟间隔，永不到期
 type ForeverDelayer time.Duration
 
 func (f ForeverDelayer) NextDelay(i int) (time.Duration, bool) {
@@ -48,28 +50,26 @@ func (t zeroDelayer) NextDelay(times int) (time.Duration, bool) {
 
 // ZeroDelayer 零间隔延迟器，你应该知道自己在做什么、为什么这么做、为什么能这样做
 //
-//	var _ RetryDelayer = ZeroDelayer(2, "trust me!")
+//	var _ Delayer = ZeroDelayer(2, "trust me!")
 func ZeroDelayer(maxRetries int, whySafe string) Delayer {
 	return zeroDelayer(maxRetries)
 }
 
 // FibonacciDelayer 斐波那契延迟器，前两项为第一次、第二次延迟时长
-// 之后按照斐波那契规则返回新延迟时长，延迟时长超过第三项时终止
+// 之后按照斐波那契规则返回新延迟时长，延迟时长大于第三项时终止
 type FibonacciDelayer [3]time.Duration
 
-func (t *FibonacciDelayer) NextDelay(times int) (time.Duration, bool) {
-	switch times {
-	case 0, 1:
-		return t[times], t[times] <= t[2]
-	default:
-		t[0], t[1] = t[1], t[0]+t[1]
-		return t[1], t[1] <= t[2]
+func (t FibonacciDelayer) NextDelay(times int) (time.Duration, bool) {
+	a, b := t[0], t[1]
+	for i := 0; i < times; i++ {
+		a, b = b, a+b
 	}
+	return a, a <= t[2]
 }
 
-var _ Delayer = (*FibonacciDelayer)(nil)
+var _ Delayer = FibonacciDelayer{}
 
-// RandomDelayer 随机延迟器，返回给入延迟间隔之间的随机值
+// RandomDelayer 随机延迟器，返回给入延迟间隔之间的随机值，永远不到期
 type RandomDelayer [2]time.Duration
 
 func (r RandomDelayer) NextDelay(times int) (delay time.Duration, ok bool) {
@@ -82,15 +82,16 @@ func (r RandomDelayer) NextDelay(times int) (delay time.Duration, ok bool) {
 	}
 }
 
-var _ Delayer = (*RandomDelayer)(nil)
+var _ Delayer = RandomDelayer{}
 
-// DelayTicker 到达延迟延迟器返回的下次延迟时长时，会发送当前时间到通道。当延迟器不再延迟时，会自动关闭通道
+// DelayTicker 到达延迟器返回的下次延迟时长时，会发送当前时间到通道。
+// 当延迟器到期时，会自动关闭通道。
 type DelayTicker struct {
 	C    <-chan time.Time
 	stop chan struct{}
 }
 
-// Stop 手动停止延迟延迟器
+// Stop 手动停止延迟器
 func (d *DelayTicker) Stop() {
 	select {
 	case <-d.stop:
@@ -99,6 +100,7 @@ func (d *DelayTicker) Stop() {
 	}
 }
 
+// run 按延迟器的节奏往 out 发心跳，延迟器到期或 Stop 被调用时关闭 out 通道
 func (d *DelayTicker) run(delayer Delayer, out chan time.Time) {
 	defer close(out)
 	// 内部定时器，用来产生信号
@@ -144,16 +146,14 @@ func NewDelayTicker(delayer Delayer) *DelayTicker {
 	return t
 }
 
-// EOD 延迟器结束符 End Of Delayer
-const EOD time.Duration = -1
-
-// WithDelay 迭代一个延迟器，会立即进行一次迭代，在延迟后进行下次迭代。迭代值为已延迟次数和接下来延迟时长，延迟时长为负表示不再进行下次迭代
+// WithDelay 用来迭代一个延迟器，迭代开始时会立即调用一次延迟器，
+// 如果它到期了会退出循环，否则调用回调函数。
+// 如果回调函数返回假也会退出循环，否则进行休眠。
 func WithDelay(delayer Delayer) func(yield func(times int, delay time.Duration) bool) {
 	return func(yield func(times int, delay time.Duration) bool) {
 		for times := 0; ; times++ {
 			delay, ok := delayer.NextDelay(times)
 			if !ok {
-				yield(times, EOD)
 				return
 			}
 			if !yield(times, delay) {
@@ -164,5 +164,5 @@ func WithDelay(delayer Delayer) func(yield func(times int, delay time.Duration) 
 	}
 }
 
-// WithDefaultDelay 迭代一个默认延迟器
+// WithDefaultDelay 用来迭代默认延迟器
 var WithDefaultDelay = WithDelay(DefaultDelayer)
