@@ -26,6 +26,18 @@ func (f *fakeRefresher) Refresh(context.Context, http.CookieJar) error {
 	return f.refresh
 }
 
+// fakeLogger 记录错误上报，用来断言 Logger 有没有被调用。
+// Logger 的签名取自 log/slog 的 ErrorContext(ctx, msg, args...)
+type fakeLogger struct {
+	msgs  []string
+	attrs [][]any
+}
+
+func (f *fakeLogger) ErrorContext(_ context.Context, msg string, args ...any) {
+	f.msgs = append(f.msgs, msg)
+	f.attrs = append(f.attrs, args)
+}
+
 func TestVerifyStates(t *testing.T) {
 	boom := errors.New("boom")
 	cases := []struct {
@@ -111,15 +123,94 @@ func TestKeepaliveJarVerify(t *testing.T) {
 	}
 }
 
-// TestRunSendsToOnError cron 场景：错误走 OnError
-func TestRunSendsToOnError(t *testing.T) {
-	var got error
+// TestVerifyLogs 配置了 Logger 时，检测与刷新失败都要上报一条
+func TestVerifyLogs(t *testing.T) {
+	boom := errors.New("boom")
+	cases := []struct {
+		name    string
+		r       Refresher
+		wantMsg string
+	}{
+		{
+			name:    "检测报错",
+			r:       &fakeRefresher{validErr: boom},
+			wantMsg: "cannot validate jar",
+		},
+		{
+			name:    "刷新报错",
+			r:       RefreshFunc(func(context.Context, http.CookieJar) error { return boom }),
+			wantMsg: "cannot refresh jar",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l := &fakeLogger{}
+			k := &KeepaliveCookieJar{Refresher: c.r, Logger: l}
+			err := k.Verify(context.Background())
+			if err == nil {
+				t.Fatal("应当报错")
+			}
+			// 错误本身仍要能被调用方识别，不能只剩日志
+			if !errors.Is(err, boom) {
+				t.Errorf("err = %v，期望能 errors.Is 到 boom", err)
+			}
+			var v *VerifyError
+			if !errors.As(err, &v) {
+				t.Fatalf("err = %T，期望 *VerifyError", err)
+			}
+			if len(l.msgs) != 1 {
+				t.Fatalf("上报了 %d 条，期望 1 条", len(l.msgs))
+			}
+			if l.msgs[0] != c.wantMsg {
+				t.Errorf("msg = %q，期望 %q", l.msgs[0], c.wantMsg)
+			}
+			if len(l.attrs[0]) != 2 || l.attrs[0][0] != "error" {
+				t.Fatalf("attrs = %v，期望 [error, err]", l.attrs[0])
+			}
+			if got, ok := l.attrs[0][1].(error); !ok || !errors.Is(got, boom) {
+				t.Errorf("attrs[1] = %v，期望 boom", l.attrs[0][1])
+			}
+		})
+	}
+}
+
+// TestRunLogs cron 场景：Run 自己吞掉错误，但要把错误交给 Logger
+func TestRunLogs(t *testing.T) {
+	l := &fakeLogger{}
 	k := &KeepaliveCookieJar{
 		Refresher: &fakeRefresher{validErr: errors.New("boom")},
-		OnError:   func(err error) { got = err },
+		Logger:    l,
 	}
 	k.Run()
-	if got == nil {
-		t.Fatal("OnError 没被调用")
+	if len(l.msgs) != 1 {
+		t.Fatalf("上报了 %d 条，期望 1 条", len(l.msgs))
+	}
+	if k.State() != StateFailed {
+		t.Errorf("State = %v，期望 StateFailed", k.State())
+	}
+}
+
+// TestRunWithoutLogger 没有 Logger 时静默返回，但不能 panic
+func TestRunWithoutLogger(t *testing.T) {
+	k := &KeepaliveCookieJar{Refresher: &fakeRefresher{validErr: errors.New("boom")}}
+	k.Run()
+	k.RunWithContext(context.Background())
+	if k.State() != StateFailed {
+		t.Errorf("State = %v，期望 StateFailed", k.State())
+	}
+}
+
+// TestRunE 不传上下文也要返回错误
+func TestRunE(t *testing.T) {
+	k := &KeepaliveCookieJar{Refresher: &fakeRefresher{valid: true}}
+	if err := k.RunE(); err != nil {
+		t.Fatal(err)
+	}
+	if k.State() != StateVerified {
+		t.Errorf("State = %v，期望 StateVerified", k.State())
+	}
+	k.Refresher = &fakeRefresher{validErr: errors.New("boom")}
+	if err := k.RunE(); err == nil {
+		t.Fatal("应当报错")
 	}
 }

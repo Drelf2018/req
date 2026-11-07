@@ -654,7 +654,7 @@ func TestCookies(t *testing.T) {
 
 - 实现 `Refresher`（`Refresh`）就能用；再实现 `Validator`（`Valid`）就会先查、无效才刷，否则每次直接刷新。
 - `State()` 读当前状态，`SinceVerified()` 看距离上次验证成功过了多久。
-- **它不起 goroutine**：多久验一次、怎么退出都由你自己写，错误也由你自己处理。
+- `Logger` 字段用于记录检验 `http.CookieJar` 时出现的错误。
 
 ````go
 k := &cookie.KeepaliveCookieJar{CookieJar: jar, Refresher: r}
