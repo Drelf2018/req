@@ -26,48 +26,31 @@ func (f *fakeRefresher) Refresh(context.Context, http.CookieJar) error {
 	return f.refresh
 }
 
-// fakeLogger 记录错误上报，用来断言 Logger 有没有被调用。
-// Logger 的签名取自 log/slog 的 ErrorContext(ctx, msg, args...)
-type fakeLogger struct {
-	msgs  []string
-	attrs [][]any
-}
-
-func (f *fakeLogger) ErrorContext(_ context.Context, msg string, args ...any) {
-	f.msgs = append(f.msgs, msg)
-	f.attrs = append(f.attrs, args)
-}
-
-func TestVerifyStates(t *testing.T) {
+func TestVerify(t *testing.T) {
 	boom := errors.New("boom")
 	cases := []struct {
 		name      string
 		r         Refresher
-		want      State
 		wantErr   string
 		refreshed bool
 	}{
 		{
 			name: "检测通过，不刷新",
 			r:    &fakeRefresher{valid: true},
-			want: StateVerified,
 		},
 		{
 			name:    "检测报错",
 			r:       &fakeRefresher{validErr: boom},
-			want:    StateFailed,
 			wantErr: "cannot validate jar: boom",
 		},
 		{
 			name:      "检测说无效，刷新成功",
 			r:         &fakeRefresher{valid: false},
-			want:      StateVerified,
 			refreshed: true,
 		},
 		{
 			name:      "检测说无效，刷新失败",
 			r:         &fakeRefresher{valid: false, refresh: boom},
-			want:      StateFailed,
 			wantErr:   "cannot refresh jar: boom",
 			refreshed: true,
 		},
@@ -75,16 +58,12 @@ func TestVerifyStates(t *testing.T) {
 			// 没实现 Validator 就直接刷新，等价于旧的 ForcedRefresher
 			name:      "没有检测器，直接刷新",
 			r:         RefreshFunc(func(context.Context, http.CookieJar) error { return nil }),
-			want:      StateVerified,
 			refreshed: true,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			state, err := Verify(context.Background(), c.r, nil)
-			if state != c.want {
-				t.Errorf("state = %v，期望 %v", state, c.want)
-			}
+			err := Verify(context.Background(), c.r, nil)
 			if c.wantErr == "" {
 				if err != nil {
 					t.Errorf("不该报错: %v", err)
@@ -123,8 +102,8 @@ func TestKeepaliveJarVerify(t *testing.T) {
 	}
 }
 
-// TestVerifyLogs 配置了 Logger 时，检测与刷新失败都要上报一条
-func TestVerifyLogs(t *testing.T) {
+// TestVerifyError 检测与刷新失败都要变成 *VerifyError，且能 errors.Is 到原因
+func TestVerifyError(t *testing.T) {
 	boom := errors.New("boom")
 	cases := []struct {
 		name    string
@@ -144,13 +123,12 @@ func TestVerifyLogs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			l := &fakeLogger{}
-			k := &KeepaliveCookieJar{Refresher: c.r, Logger: l}
+			k := &KeepaliveCookieJar{Refresher: c.r}
 			err := k.Verify(context.Background())
 			if err == nil {
 				t.Fatal("应当报错")
 			}
-			// 错误本身仍要能被调用方识别，不能只剩日志
+			// 错误要能被调用方识别，不能只剩日志
 			if !errors.Is(err, boom) {
 				t.Errorf("err = %v，期望能 errors.Is 到 boom", err)
 			}
@@ -158,43 +136,24 @@ func TestVerifyLogs(t *testing.T) {
 			if !errors.As(err, &v) {
 				t.Fatalf("err = %T，期望 *VerifyError", err)
 			}
-			if len(l.msgs) != 1 {
-				t.Fatalf("上报了 %d 条，期望 1 条", len(l.msgs))
-			}
-			if l.msgs[0] != c.wantMsg {
-				t.Errorf("msg = %q，期望 %q", l.msgs[0], c.wantMsg)
-			}
-			if len(l.attrs[0]) != 2 || l.attrs[0][0] != "error" {
-				t.Fatalf("attrs = %v，期望 [error, err]", l.attrs[0])
-			}
-			if got, ok := l.attrs[0][1].(error); !ok || !errors.Is(got, boom) {
-				t.Errorf("attrs[1] = %v，期望 boom", l.attrs[0][1])
+			if v.Msg != c.wantMsg {
+				t.Errorf("Msg = %q，期望 %q", v.Msg, c.wantMsg)
 			}
 		})
 	}
 }
 
-// TestRunLogs cron 场景：Run 自己吞掉错误，但要把错误交给 Logger
-func TestRunLogs(t *testing.T) {
-	l := &fakeLogger{}
-	k := &KeepaliveCookieJar{
-		Refresher: &fakeRefresher{validErr: errors.New("boom")},
-		Logger:    l,
-	}
-	k.Run()
-	if len(l.msgs) != 1 {
-		t.Fatalf("上报了 %d 条，期望 1 条", len(l.msgs))
-	}
-	if k.State() != StateFailed {
-		t.Errorf("State = %v，期望 StateFailed", k.State())
-	}
-}
-
-// TestRunWithoutLogger 没有 Logger 时静默返回，但不能 panic
-func TestRunWithoutLogger(t *testing.T) {
+// TestRunPanics cron 场景：Run 系列出错时 panic，交给 cron 的 Recover 包装器处理
+func TestRunPanics(t *testing.T) {
 	k := &KeepaliveCookieJar{Refresher: &fakeRefresher{validErr: errors.New("boom")}}
+
+	defer func() {
+		if recover() == nil {
+			t.Error("Run 应当 panic")
+		}
+	}()
 	k.Run()
-	k.RunWithContext(context.Background())
+
 	if k.State() != StateFailed {
 		t.Errorf("State = %v，期望 StateFailed", k.State())
 	}

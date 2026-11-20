@@ -8,7 +8,7 @@ import (
 // Delayer 延迟器，决定重试的间隔与次数。
 //
 // 向延迟器传入已重试次数，返回下次要等的时长。
-// 延迟器到期时应返回 ok==false ，即不再重试。
+// 延迟器到期时应返回 ok==false，即不再重试。
 type Delayer interface {
 	NextDelay(times int) (delay time.Duration, ok bool)
 }

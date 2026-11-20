@@ -66,7 +66,7 @@ func (s *Session) UserAgent() string {
 	return s.Header.Get("User-Agent")
 }
 
-// JoinPath 拼接会话里的基础路径和 rawURL ，如果后者不是以 "/" 开头会直接返回其解析结果
+// JoinPath 拼接会话里的基础路径和 rawURL，如果后者不是以 "/" 开头会直接返回其解析结果
 func (s *Session) JoinPath(rawURL string) (*url.URL, error) {
 	if s.BaseURL == nil || !strings.HasPrefix(rawURL, "/") {
 		return url.Parse(rawURL)
@@ -206,7 +206,7 @@ func (s *Session) NewRequest(api API) (r *http.Request, err error) {
 	return s.NewRequestWithContext(context.Background(), api)
 }
 
-// SetOnlyCookieJar 是一个不返回 Cookies 的 http.CookieJar ，仅可用于 SetCookies
+// SetOnlyCookieJar 是一个不返回 Cookies 的 http.CookieJar，仅可用于 SetCookies
 type SetOnlyCookieJar struct {
 	http.CookieJar
 }
